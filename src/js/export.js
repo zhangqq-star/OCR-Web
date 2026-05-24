@@ -5,7 +5,11 @@ const Exporter = (() => {
   async function exportToExcel() {
     let parts;
     if (typeof Shelf !== 'undefined' && Shelf.getActiveShelfId) {
-      parts = await DB.getByShelf(Shelf.getActiveShelfId());
+      if (typeof DataStore !== 'undefined') {
+        parts = await DataStore.getByShelf(Shelf.getActiveShelfId());
+      } else {
+        parts = await DB.getByShelf(Shelf.getActiveShelfId());
+      }
     } else {
       parts = await DB.getAll();
     }
@@ -45,7 +49,12 @@ const Exporter = (() => {
     const now = new Date();
     const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
-    XLSX.writeFile(wb, `货架清单_${dateStr}.xlsx`);
+    // 包含空间名称
+    let spaceName = '';
+    if (typeof TeamManager !== 'undefined' && TeamManager.getCurrentSpace()) {
+      spaceName = '_' + TeamManager.getCurrentSpace().name;
+    }
+    XLSX.writeFile(wb, `货架清单${spaceName}_${dateStr}.xlsx`);
     showToast('导出成功');
   }
 

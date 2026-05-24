@@ -1,9 +1,11 @@
 /**
  * SQLite 数据层 — SQL.js + OPFS 持久化
  * 数据库: OcrShelfDB (SQLite)
+ * Schema v2: 新增 spaces、sync_queue，shelves 增加 space_id/server_id
  */
 const DB = (() => {
   const DB_FILE = 'ocrshelf.db';
+  const SCHEMA_VERSION = 2;
   let db = null;
   let initPromise = null;
 
@@ -80,10 +82,14 @@ const DB = (() => {
   // ---- 建表 ----
 
   function createSchema() {
+    db.run('PRAGMA foreign_keys = ON');
+
     db.run(`
       CREATE TABLE IF NOT EXISTS shelves (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
+        space_id TEXT DEFAULT 'personal',
+        server_id INTEGER,
         createdAt INTEGER NOT NULL
       )
     `);
@@ -103,10 +109,75 @@ const DB = (() => {
         FOREIGN KEY (shelfId) REFERENCES shelves(id) ON DELETE CASCADE
       )
     `);
-    // SQL.js 默认不启用外键，需手动开启
-    db.run('PRAGMA foreign_keys = ON');
     db.run('CREATE INDEX IF NOT EXISTS idx_parts_shelfId ON parts(shelfId)');
     db.run('CREATE INDEX IF NOT EXISTS idx_parts_position ON parts(shelfRow, shelfCol)');
+
+    // v2 新增表
+    db.run(`
+      CREATE TABLE IF NOT EXISTS spaces (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('personal', 'team')),
+        server_id INTEGER,
+        synced_at INTEGER
+      )
+    `);
+    db.run(`
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_name TEXT NOT NULL,
+        record_id INTEGER,
+        operation TEXT NOT NULL CHECK(operation IN ('insert', 'update', 'delete')),
+        endpoint TEXT NOT NULL,
+        payload TEXT,
+        created_at INTEGER NOT NULL
+      )
+    `);
+
+    // 记录 schema 版本
+    db.run('CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)');
+    db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+  }
+
+  // v1 → v2 迁移
+  function migrateV1toV2() {
+    try {
+      // 检查 shelves 是否已有 space_id 列
+      const info = db.exec("PRAGMA table_info('shelves')");
+      const cols = info.length > 0 ? info[0].values.map(r => r[1]) : [];
+      if (!cols.includes('space_id')) {
+        db.run("ALTER TABLE shelves ADD COLUMN space_id TEXT DEFAULT 'personal'");
+      }
+      if (!cols.includes('server_id')) {
+        db.run('ALTER TABLE shelves ADD COLUMN server_id INTEGER');
+      }
+      // 创建 v2 新表
+      db.run(`
+        CREATE TABLE IF NOT EXISTS spaces (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK(type IN ('personal', 'team')),
+          server_id INTEGER,
+          synced_at INTEGER
+        )
+      `);
+      db.run(`
+        CREATE TABLE IF NOT EXISTS sync_queue (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          table_name TEXT NOT NULL,
+          record_id INTEGER,
+          operation TEXT NOT NULL CHECK(operation IN ('insert', 'update', 'delete')),
+          endpoint TEXT NOT NULL,
+          payload TEXT,
+          created_at INTEGER NOT NULL
+        )
+      `);
+      db.run('CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)');
+      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+      console.log('[DB] v1 → v2 迁移完成');
+    } catch (e) {
+      console.warn('[DB] 迁移失败（可能已是 v2）:', e.message);
+    }
   }
 
   // ---- 查询辅助 ----
@@ -130,7 +201,7 @@ const DB = (() => {
 
   function rowToShelf(row) {
     if (!row) return null;
-    return { id: row[0], name: row[1], createdAt: row[2] };
+    return { id: row[0], name: row[1], space_id: row[2], server_id: row[3], createdAt: row[4] };
   }
 
   // ---- 初始化 ----
@@ -158,6 +229,7 @@ const DB = (() => {
       if (savedData && savedData.length > 0) {
         db = new SQL.Database(savedData);
         db.run('PRAGMA foreign_keys = ON');
+        migrateV1toV2();
         console.log('[DB] 从 OPFS 加载已有数据库');
       } else {
         db = new SQL.Database();
@@ -173,17 +245,22 @@ const DB = (() => {
 
   // ---- Shelves ----
 
-  async function createShelf(name) {
+  async function createShelf(name, spaceId) {
     await open();
-    db.run('INSERT INTO shelves (name, createdAt) VALUES (?, ?)', [name, Date.now()]);
+    const sid = spaceId || 'personal';
+    db.run('INSERT INTO shelves (name, space_id, createdAt) VALUES (?, ?, ?)', [name, sid, Date.now()]);
     const result = db.exec('SELECT last_insert_rowid()');
     scheduleSave();
     return result[0].values[0][0];
   }
 
-  async function getAllShelves() {
+  async function getAllShelves(spaceId) {
     await open();
-    const result = db.exec('SELECT * FROM shelves ORDER BY createdAt');
+    let sql = 'SELECT * FROM shelves';
+    let params = [];
+    if (spaceId) { sql += ' WHERE space_id = ?'; params.push(spaceId); }
+    sql += ' ORDER BY createdAt';
+    const result = db.exec(sql, params);
     if (!result.length || !result[0].values.length) return [];
     return result[0].values.map(rowToShelf);
   }
@@ -261,7 +338,7 @@ const DB = (() => {
 
   async function getByShelf(shelfId) {
     await open();
-    const result = db.exec('SELECT * FROM parts WHERE shelfId = ?', [shelfId]);
+    const result = db.exec('SELECT * FROM parts WHERE shelfId = ? ORDER BY shelfRow, shelfCol', [shelfId]);
     if (!result.length || !result[0].values.length) return [];
     return result[0].values.map(rowToPart);
   }
@@ -279,11 +356,89 @@ const DB = (() => {
     scheduleSave();
   }
 
+  // ---- Spaces (v2) ----
+
+  async function getSpaces() {
+    await open();
+    const result = db.exec('SELECT * FROM spaces ORDER BY type, name');
+    if (!result.length || !result[0].values.length) {
+      // 首次：自动创建个人空间
+      db.run("INSERT INTO spaces (id, name, type) VALUES ('personal', '个人空间', 'personal')");
+      scheduleSave();
+      return [{ id: 'personal', name: '个人空间', type: 'personal', server_id: null, synced_at: null }];
+    }
+    return result[0].values.map(r => ({ id: r[0], name: r[1], type: r[2], server_id: r[3], synced_at: r[4] }));
+  }
+
+  async function createSpace(id, name, type, serverId) {
+    await open();
+    db.run('INSERT OR REPLACE INTO spaces (id, name, type, server_id, synced_at) VALUES (?, ?, ?, ?, ?)',
+      [id, name, type, serverId || null, Date.now()]);
+    scheduleSave();
+  }
+
+  async function updateSpaceSyncTime(spaceId) {
+    await open();
+    db.run('UPDATE spaces SET synced_at = ? WHERE id = ?', [Date.now(), spaceId]);
+    scheduleSave();
+  }
+
+  async function getShelvesBySpace(spaceId) {
+    await open();
+    const result = db.exec('SELECT * FROM shelves WHERE space_id = ? ORDER BY createdAt', [spaceId]);
+    if (!result.length || !result[0].values.length) return [];
+    return result[0].values.map(rowToShelf);
+  }
+
+  async function updateShelfServerId(localId, serverId) {
+    await open();
+    db.run('UPDATE shelves SET server_id = ? WHERE id = ?', [serverId, localId]);
+    scheduleSave();
+  }
+
+  // ---- Sync Queue (v2) ----
+
+  async function enqueueSync(tableName, recordId, operation, endpoint, payload) {
+    await open();
+    db.run(
+      'INSERT INTO sync_queue (table_name, record_id, operation, endpoint, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      [tableName, recordId, operation, endpoint, JSON.stringify(payload), Date.now()]
+    );
+    scheduleSave();
+  }
+
+  async function getSyncQueue() {
+    await open();
+    const result = db.exec('SELECT * FROM sync_queue ORDER BY id');
+    if (!result.length || !result[0].values.length) return [];
+    return result[0].values.map(r => ({
+      id: r[0], table_name: r[1], record_id: r[2],
+      operation: r[3], endpoint: r[4], payload: JSON.parse(r[5] || '{}'), created_at: r[6],
+    }));
+  }
+
+  async function clearSyncEntry(id) {
+    await open();
+    db.run('DELETE FROM sync_queue WHERE id = ?', [id]);
+    scheduleSave();
+  }
+
+  async function countSyncQueue() {
+    await open();
+    const result = db.exec('SELECT COUNT(*) as count FROM sync_queue');
+    if (!result.length || !result[0].values.length) return 0;
+    return result[0].values[0][0];
+  }
+
   return {
-    open,
+    open, saveNow,
     // Shelves
     createShelf, getAllShelves, updateShelf, deleteShelf,
     // Parts
     add, update, remove, get, getByPosition, getByShelf, getAll, migratePartsToShelf,
+    // Spaces (v2)
+    getSpaces, createSpace, updateSpaceSyncTime, getShelvesBySpace, updateShelfServerId,
+    // Sync (v2)
+    enqueueSync, getSyncQueue, clearSyncEntry, countSyncQueue,
   };
 })();

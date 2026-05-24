@@ -25,8 +25,13 @@
 
   <!-- 顶部标题栏 -->
   <header class="header">
-    <h1>📦 货架管理 <span style="font-size:0.65rem;opacity:0.45;font-weight:400;margin-left:2px;">v1.2</span></h1>
-    <button id="btnExport" class="btn-icon" title="导出 Excel">📥</button>
+    <h1>📦 货架管理 <span style="font-size:0.65rem;opacity:0.45;font-weight:400;margin-left:2px;">v2.0</span></h1>
+    <div class="header-right">
+      <span id="spaceBadge" class="space-badge" title="切换空间">个人</span>
+      <button id="btnProfile" class="btn-icon" title="账号与空间">👤</button>
+      <button id="btnExport" class="btn-icon" title="导出 Excel">📥</button>
+    </div>
+    <div id="offlineIndicator" class="offline-indicator hidden">离线</div>
   </header>
 
   <!-- 主内容区 -->
@@ -74,12 +79,29 @@
         <span id="shelfIndicator" class="shelf-indicator"></span>
       </div>
     </section>
+
+    <!-- 空间视图 -->
+    <section id="viewSpace" class="view">
+      <div id="spaceContent" class="space-content">
+        <!-- 未登录时显示 -->
+        <div id="spaceLoginPrompt" class="space-login-prompt">
+          <div class="space-hero">🔐</div>
+          <p class="space-hero-text">登录后可创建团队空间<br>与成员协同管理货架</p>
+          <button id="btnShowLogin" class="btn-primary" style="max-width:240px;margin:0 auto;">登录</button>
+          <button id="btnShowRegister" class="btn-secondary" style="max-width:240px;margin:8px auto 0;">注册新账号</button>
+          <p class="space-local-hint">或继续使用本地模式，数据保存在当前设备</p>
+        </div>
+        <!-- 已登录时通过 JS 动态渲染 -->
+        <div id="spaceTeamList" class="space-team-list hidden"></div>
+      </div>
+    </section>
   </main>
 
   <!-- 底部导航栏 -->
   <nav class="tab-bar">
     <button class="tab active" data-view="viewScan">📷 扫描</button>
     <button class="tab" data-view="viewShelf">📋 货架</button>
+    <button class="tab" data-view="viewSpace">📂 空间</button>
   </nav>
 
   <!-- 货架位置选择弹窗 -->
@@ -200,10 +222,151 @@
     </div>
   </div>
 
+  <!-- 登录弹窗 -->
+  <div id="modalLogin" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>登录</h3>
+      <form id="formLogin" class="auth-form">
+        <label>用户名</label>
+        <input type="text" id="loginUsername" autocomplete="username" required>
+        <label>密码</label>
+        <input type="password" id="loginPassword" autocomplete="current-password" required>
+        <div id="loginError" class="auth-error hidden"></div>
+        <div class="modal-actions">
+          <button type="button" id="btnLoginCancel" class="btn-secondary">取消</button>
+          <button type="submit" class="btn-primary">登录</button>
+        </div>
+      </form>
+      <p class="auth-link" id="btnGotoRegister">没有账号？立即注册</p>
+    </div>
+  </div>
+
+  <!-- 注册弹窗 -->
+  <div id="modalRegister" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>注册</h3>
+      <form id="formRegister" class="auth-form">
+        <label>用户名</label>
+        <input type="text" id="regUsername" autocomplete="username" required>
+        <label>密码</label>
+        <input type="password" id="regPassword" autocomplete="new-password" minlength="6" required>
+        <label>确认密码</label>
+        <input type="password" id="regPassword2" autocomplete="new-password" minlength="6" required>
+        <div id="regError" class="auth-error hidden"></div>
+        <div class="modal-actions">
+          <button type="button" id="btnRegCancel" class="btn-secondary">取消</button>
+          <button type="submit" class="btn-primary">注册</button>
+        </div>
+      </form>
+      <p class="auth-link" id="btnGotoLogin">已有账号？去登录</p>
+    </div>
+  </div>
+
+  <!-- 空间切换弹窗 -->
+  <div id="modalSpace" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>切换空间</h3>
+      <div id="spaceList" class="space-list"></div>
+      <div class="modal-actions" id="spaceActions" style="flex-wrap:wrap;">
+        <button id="btnCreateTeam" class="btn-secondary" style="flex:1 1 calc(50% - 4px);">+ 创建团队</button>
+        <button id="btnJoinTeam" class="btn-secondary" style="flex:1 1 calc(50% - 4px);">+ 加入团队</button>
+      </div>
+      <div id="spaceUserInfo" class="space-user-info">
+        <button id="btnLogout" class="btn-secondary" style="color:var(--danger);">退出登录</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 创建团队弹窗 -->
+  <div id="modalCreateTeam" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>创建团队</h3>
+      <form id="formCreateTeam">
+        <label>团队名称</label>
+        <input type="text" id="createTeamName" required>
+        <label>描述（可选）</label>
+        <input type="text" id="createTeamDesc">
+        <div id="createTeamError" class="auth-error hidden"></div>
+        <div class="modal-actions">
+          <button type="button" id="btnCreateTeamCancel" class="btn-secondary">取消</button>
+          <button type="submit" class="btn-primary">创建</button>
+        </div>
+      </form>
+      <div id="createTeamResult" class="hidden">
+        <p style="margin-bottom:8px;">团队创建成功！邀请码：</p>
+        <div id="inviteCodeDisplay" class="invite-code-display"></div>
+        <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:6px;">将邀请码分享给团队成员即可加入</p>
+        <button id="btnCreateTeamDone" class="btn-primary" style="margin-top:12px;width:100%;">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 加入团队弹窗 -->
+  <div id="modalJoinTeam" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>加入团队</h3>
+      <form id="formJoinTeam">
+        <label>团队 ID</label>
+        <input type="number" id="joinTeamId" placeholder="请输入团队 ID" required>
+        <label>邀请码</label>
+        <input type="text" id="joinInviteCode" placeholder="8 位邀请码" required>
+        <div id="joinTeamError" class="auth-error hidden"></div>
+        <div class="modal-actions">
+          <button type="button" id="btnJoinTeamCancel" class="btn-secondary">取消</button>
+          <button type="submit" class="btn-primary">加入</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 团队管理弹窗 -->
+  <div id="modalTeamManage" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3 id="teamManageTitle">团队管理</h3>
+      <div id="teamManageInvite" class="team-manage-invite">
+        <span>邀请码：</span>
+        <span id="teamManageInviteCode" class="invite-code-small"></span>
+        <button id="btnRegenInvite" class="btn-secondary" style="font-size:0.7rem;padding:4px 8px;">重新生成</button>
+      </div>
+      <div id="teamMemberList" class="team-member-list"></div>
+      <div class="modal-actions" style="flex-wrap:wrap;">
+        <button id="btnLeaveTeam" class="btn-secondary" style="color:var(--danger);flex:1;">离开团队</button>
+        <button id="btnDeleteTeam" class="btn-danger" style="flex:1;">删除团队</button>
+      </div>
+      <button id="btnTeamManageClose" class="btn-secondary" style="width:100%;margin-top:8px;">关闭</button>
+    </div>
+  </div>
+
+  <!-- 数据迁移弹窗 -->
+  <div id="modalMigration" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>数据迁移</h3>
+      <p id="migrationText" style="margin-bottom:12px;">检测到本地有 N 个货架的离线数据。是否上传到云端？</p>
+      <div id="migrationProgress" class="hidden">
+        <div class="spinner" style="margin:12px auto;"></div>
+        <p style="text-align:center;font-size:0.85rem;color:var(--text-secondary);">正在上传...</p>
+      </div>
+      <div class="modal-actions">
+        <button id="btnMigrationSkip" class="btn-secondary">暂留本地</button>
+        <button id="btnMigrationUpload" class="btn-primary">上传到云端</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="toast hidden"></div>
 
   <script src="src/js/db.js"></script>
+  <script src="src/js/auth.js"></script>
+  <script src="src/js/api.js"></script>
+  <script src="src/js/team.js"></script>
   <script src="src/js/camera.js"></script>
   <script src="src/js/ocr.js"></script>
   <script src="src/js/shelf.js"></script>

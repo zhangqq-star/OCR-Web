@@ -207,6 +207,14 @@ input, textarea, button {
   margin-bottom: 4px;
 }
 
+.ocr-code-select {
+  color: #fff;
+}
+.ocr-code-select.ocr-code-active {
+  background: rgba(108,140,255,0.45);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .ocr-result-actions {
   display: flex;
   gap: 8px;
@@ -461,6 +469,10 @@ input, textarea, button {
 .shelf-cell .cell-quantity {
   font-size: 0.58rem;
   color: var(--text-secondary);
+}
+.shelf-cell .cell-dup-warn {
+  color: var(--danger, #FF3B30);
+  font-weight: 700;
 }
 
 .shelf-cell .cell-position {
@@ -907,4 +919,231 @@ input, textarea, button {
   min-width: 0;
   font-size: 0.82rem;
   padding: 10px 8px;
+}
+
+/* ===== 头部右侧 ===== */
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.space-badge {
+  font-size: 0.68rem;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.space-badge:active { background: rgba(0,122,255,0.25); }
+
+/* ===== 离线指示器 ===== */
+.offline-indicator {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  padding: 4px 16px;
+  border-radius: 0 0 12px 12px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: #FF9500;
+  color: #fff;
+}
+.offline-indicator.hidden { display: none; }
+
+/* ===== 认证表单 ===== */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.auth-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--danger-light);
+  color: var(--danger);
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+}
+.auth-link {
+  font-size: 0.8rem;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: center;
+  margin-top: 12px;
+}
+.auth-link:active { opacity: 0.7; }
+
+/* ===== 空间视图 ===== */
+.space-content {
+  max-width: 480px;
+  margin: 0 auto;
+}
+.space-login-prompt {
+  text-align: center;
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.space-hero {
+  font-size: 3.5rem;
+  margin-bottom: 16px;
+}
+.space-hero-text {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+  line-height: 1.5;
+}
+.space-local-hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-top: 20px;
+}
+
+.space-team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.space-card {
+  padding: 14px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow-sm);
+}
+.space-card:active { background: var(--bg-primary); }
+.space-card.active {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+.space-card-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+.space-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.space-card-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  letter-spacing: -0.2px;
+}
+.space-card-meta {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ===== 空间列表（弹窗内） ===== */
+.space-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.space-user-info {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-light);
+  text-align: center;
+}
+
+/* ===== 邀请码展示 ===== */
+.invite-code-display {
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 1.4rem;
+  letter-spacing: 4px;
+  font-weight: 700;
+  text-align: center;
+  padding: 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  user-select: all;
+}
+.invite-code-small {
+  font-family: "SF Mono", "Menlo", monospace;
+  font-size: 0.85rem;
+  letter-spacing: 3px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* ===== 团队成员管理 ===== */
+.team-manage-invite {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+}
+.team-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 250px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.member-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.member-role-tag {
+  font-size: 0.65rem;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.member-role-tag.owner {
+  background: var(--accent-light);
+  color: var(--accent);
+}
+.member-actions {
+  display: flex;
+  gap: 4px;
+}
+.member-actions button {
+  font-size: 0.65rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  cursor: pointer;
 }

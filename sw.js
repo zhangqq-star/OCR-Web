@@ -1,15 +1,18 @@
 /**
  * Service Worker — 离线缓存策略
- * 缓存静态资源，IndexedDB 数据本身就在本地无需 SW 处理
+ * v3: 新增账号/团队模块，排除 API 路径
  */
 
-const CACHE_NAME = 'ocr-shelf-v2';
+const CACHE_NAME = 'ocr-shelf-v3';
 
 const PRE_CACHE = [
   './',
   './index.html',
   './src/css/style.css',
   './src/js/db.js',
+  './src/js/auth.js',
+  './src/js/api.js',
+  './src/js/team.js',
   './src/js/camera.js',
   './src/js/ocr.js',
   './src/js/shelf.js',
@@ -41,14 +44,15 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// 请求拦截：缓存优先
+// 请求拦截：缓存优先，但跳过 API 请求
 self.addEventListener('fetch', (e) => {
-  // 跳过 chrome-extension 等非 http(s) 请求
   if (!e.request.url.startsWith('http')) return;
+
+  // API 请求绝不缓存
+  if (e.request.url.includes('/api/')) return;
 
   e.respondWith(
     caches.match(e.request).then((cached) => {
-      // 后台更新缓存
       const fetchPromise = fetch(e.request).then((response) => {
         if (response && response.status === 200) {
           const clone = response.clone();

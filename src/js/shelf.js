@@ -23,7 +23,13 @@ const Shelf = (() => {
   // ---- 初始化 ----
 
   async function init() {
-    shelves = await DB.getAllShelves();
+    // 使用 TeamManager 加载当前空间的货架
+    if (typeof TeamManager !== 'undefined') {
+      shelves = await TeamManager.getShelves();
+    }
+    if (!shelves || shelves.length === 0) {
+      shelves = await DB.getAllShelves();
+    }
     if (shelves.length === 0) {
       const id = await DB.createShelf('货架 1');
       await DB.migratePartsToShelf(id);
@@ -32,7 +38,7 @@ const Shelf = (() => {
     const savedId = localStorage.getItem('activeShelfId');
     if (savedId && shelves.find(s => s.id === Number(savedId))) {
       activeShelfId = Number(savedId);
-    } else {
+    } else if (shelves.length > 0) {
       activeShelfId = shelves[0].id;
     }
     return activeShelfId;
@@ -43,9 +49,16 @@ const Shelf = (() => {
   async function createShelf() {
     const name = prompt('请输入货架名称：', `货架 ${shelves.length + 1}`);
     if (!name || !name.trim()) return;
-    const id = await DB.createShelf(name.trim());
-    shelves = await DB.getAllShelves();
-    await switchTo(id);
+    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
+      await TeamManager.createShelf(name.trim());
+      shelves = await TeamManager.getShelves();
+    } else {
+      const spaceId = typeof TeamManager !== 'undefined' ? TeamManager.getCurrentSpace()?.id : 'personal';
+      await DB.createShelf(name.trim(), spaceId);
+      shelves = await DB.getAllShelves(spaceId);
+    }
+    if (shelves.length > 0) await switchTo(shelves[shelves.length - 1].id);
+    await render();
   }
 
   async function renameCurrent() {
@@ -53,8 +66,12 @@ const Shelf = (() => {
     if (!current) return;
     const name = prompt('重命名货架：', current.name);
     if (!name || !name.trim() || name.trim() === current.name) return;
-    await DB.updateShelf(activeShelfId, name.trim());
-    shelves = await DB.getAllShelves();
+    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
+      await TeamManager.renameShelf(activeShelfId, name.trim());
+    } else {
+      await DB.updateShelf(activeShelfId, name.trim());
+    }
+    shelves = await DataStore.getAllShelves();
     render();
   }
 
@@ -63,13 +80,18 @@ const Shelf = (() => {
       showToast('至少保留一个货架');
       return;
     }
-    const parts = await DB.getByShelf(activeShelfId);
+    const parts = await DataStore.getByShelf(activeShelfId);
     const msg = parts.length > 0
       ? `该货架有 ${parts.length} 个零件，删除货架将同时删除所有零件，确定吗？`
       : '确定要删除该货架吗？';
     if (!confirm(msg)) return;
-    await DB.deleteShelf(activeShelfId);
-    shelves = await DB.getAllShelves();
+    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
+      await TeamManager.deleteShelf(activeShelfId);
+      shelves = await TeamManager.getShelves();
+    } else {
+      await DB.deleteShelf(activeShelfId);
+      shelves = await DB.getAllShelves();
+    }
     activeShelfId = shelves[0].id;
     localStorage.setItem('activeShelfId', activeShelfId);
     await render();
@@ -122,11 +144,13 @@ const Shelf = (() => {
     const grid = document.getElementById('shelfGrid');
     grid.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
 
-    const parts = await DB.getByShelf(activeShelfId);
+    const parts = await DataStore.getByShelf(activeShelfId);
     const byPos = {};
     parts.forEach(p => {
       if (p.shelfRow != null && p.shelfCol != null) {
-        byPos[`${p.shelfRow}_${p.shelfCol}`] = p;
+        const k = `${p.shelfRow}_${p.shelfCol}`;
+        if (!byPos[k]) byPos[k] = [];
+        byPos[k].push(p);
       }
     });
 
@@ -135,7 +159,8 @@ const Shelf = (() => {
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
         const key = `${row}_${col}`;
-        const part = byPos[key];
+        const partsAtPos = byPos[key];
+        const part = partsAtPos ? partsAtPos[0] : null;
 
         const cell = document.createElement('div');
         cell.className = 'shelf-cell' + (part ? ' occupied' : ' empty');
@@ -147,7 +172,8 @@ const Shelf = (() => {
             `<span class="cell-position">${row+1}-${col+1}</span>` +
             (part.code ? `<span class="cell-code" title="${escapeHtml(part.code)}">${escapeHtml(part.code)}</span>` : '') +
             (part.name ? `<span class="cell-name">${escapeHtml(part.name)}</span>` : '') +
-            (part.quantity > 1 ? `<span class="cell-quantity">×${part.quantity}</span>` : '');
+            (part.quantity > 1 ? `<span class="cell-quantity">×${part.quantity}</span>` : '') +
+            (partsAtPos.length > 1 ? `<span class="cell-quantity cell-dup-warn">×${partsAtPos.length}</span>` : '');
 
           cell.addEventListener('click', () => {
             if (Date.now() < ignoreClickUntil) return;
@@ -192,6 +218,10 @@ const Shelf = (() => {
 
     updateNavButtons();
     updateStats(parts.length);
+    // 若存在重复位置（旧数据），输出警告以便排查
+    if (parts.length > Object.keys(byPos).length) {
+      console.warn(`[Shelf] 检测到同一位置有多个零件：共 ${parts.length} 条记录，仅 ${Object.keys(byPos).length} 个不同位置`);
+    }
   }
 
   // 全局 pointer 事件 —— 长按过程中移动则取消
@@ -344,12 +374,12 @@ const Shelf = (() => {
     };
 
     if (id) {
-      const existing = await DB.get(Number(id));
-      await DB.update(Number(id), { ...existing, ...base });
+      const existing = await DataStore.get(Number(id));
+      await DataStore.updatePart(Number(id), { ...existing, ...base });
     } else {
-      const dup = await DB.getByPosition(base.shelfRow, base.shelfCol, activeShelfId);
+      const dup = await DataStore.getByPosition(base.shelfRow, base.shelfCol, activeShelfId);
       if (dup) { showToast('该位置已被占用'); return; }
-      await DB.add(base);
+      await DataStore.addPart(base);
     }
 
     closeDetail();
@@ -361,7 +391,7 @@ const Shelf = (() => {
     const id = document.getElementById('detailId').value;
     if (!id) return;
     if (!confirm('确定要删除该零件吗？')) return;
-    await DB.remove(Number(id));
+    await DataStore.removePart(Number(id));
     closeDetail();
     await render();
     showToast('零件已删除');

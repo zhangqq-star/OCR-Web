@@ -13,10 +13,95 @@ function showToast(msg) {
 
 // 当前识别结果暂存
 let pendingOcrResult = null;
+let selectedBatchCodeIdx = 0; // 批量模式下用户选择的编号索引
 
 // 连续导入状态
 let batchState = null; // { shelfId, startRow, startCol, currentRow, currentCol, direction, overwritePolicy, occupied, count, skipCount, overwriteCount, startTime, totalCells }
 function isBatchMode() { return batchState !== null; }
+
+// 应用模式: 'local' | 'connected'
+let appMode = 'local';
+
+// ===== DataStore 抽象层 =====
+const DataStore = {
+  async addPart(part) {
+    if (appMode === 'connected' && TeamManager.isTeamSpace()) {
+      const space = TeamManager.getCurrentSpace();
+      try {
+        const res = await API.post(`/api/teams/${space.server_id}/shelves/${part.shelfId}/parts`, {
+          name: part.name, code: part.code, specs: part.specs,
+          quantity: part.quantity, note: part.note,
+          shelfRow: part.shelfRow, shelfCol: part.shelfCol,
+        });
+        // 同时缓存到本地
+        const localPart = { ...part, updatedAt: Date.now() };
+        await DB.add(localPart);
+        return res.data.id;
+      } catch (e) {
+        showToast('网络异常，已保存到本地');
+      }
+    }
+    return DB.add(part);
+  },
+
+  async updatePart(id, part) {
+    if (appMode === 'connected' && TeamManager.isTeamSpace()) {
+      const space = TeamManager.getCurrentSpace();
+      try {
+        await API.put(`/api/teams/${space.server_id}/shelves/${part.shelfId}/parts/${id}`, part);
+      } catch (e) { showToast('网络异常，已保存到本地'); }
+    }
+    return DB.update(id, part);
+  },
+
+  async removePart(id) {
+    if (appMode === 'connected' && TeamManager.isTeamSpace()) {
+      const space = TeamManager.getCurrentSpace();
+      try {
+        const part = await DB.get(id);
+        if (part) {
+          await API.del(`/api/teams/${space.server_id}/shelves/${part.shelfId}/parts/${id}`);
+        }
+      } catch (e) { /* ignore */ }
+    }
+    return DB.remove(id);
+  },
+
+  async getByShelf(shelfId) {
+    if (appMode === 'connected' && TeamManager.isTeamSpace()) {
+      try {
+        const space = TeamManager.getCurrentSpace();
+        const res = await API.get(`/api/teams/${space.server_id}/shelves/${shelfId}/parts`);
+        // 同时更新本地缓存
+        return (res.data || []).map(p => ({ ...p, shelfId: p.shelf_id, shelfRow: p.shelf_row, shelfCol: p.shelf_col, updatedAt: p.updated_at }));
+      } catch (e) { /* fallback to local */ }
+    }
+    return DB.getByShelf(shelfId);
+  },
+
+  async getByPosition(row, col, shelfId) {
+    return DB.getByPosition(row, col, shelfId);
+  },
+
+  async get(id) {
+    return DB.get(id);
+  },
+
+  async getAllShelves() {
+    if (appMode === 'connected' && TeamManager.isTeamSpace()) {
+      try {
+        const space = TeamManager.getCurrentSpace();
+        const res = await API.get(`/api/teams/${space.server_id}/shelves`);
+        return (res.data || []).map(s => ({ id: s.id, name: s.name, createdAt: s.created_at }));
+      } catch (e) { /* fallback */ }
+    }
+    const space = TeamManager.getCurrentSpace();
+    if (space) {
+      return DB.getShelvesBySpace(space.id);
+    }
+    return DB.getAllShelves();
+  },
+};
 
 // ===== Tab 切换 =====
 function switchTab(viewId) {
@@ -58,13 +143,22 @@ function stopCamera() {
 
 function resetScanUI() {
   if (isBatchMode()) {
-    // 批量模式下只隐藏 OCR 结果，恢复视频预览
     document.getElementById('ocrProgress').classList.add('hidden');
     document.getElementById('ocrResult').classList.add('hidden');
     pendingOcrResult = null;
-    const video = document.getElementById('video');
-    video.classList.remove('hidden');
-    video.play();
+    if (Camera.isActive()) {
+      // 摄像头工作中：恢复视频预览
+      const video = document.getElementById('video');
+      video.classList.remove('hidden');
+      video.play();
+    } else {
+      // 摄像头已关闭：显示打开按钮，隐藏视频和拍照按钮
+      document.getElementById('video').classList.add('hidden');
+      document.getElementById('scanPlaceholder').classList.remove('hidden');
+      document.getElementById('btnStartCamera').classList.remove('hidden');
+      document.getElementById('btnCapture').classList.add('hidden');
+      document.getElementById('btnStopCamera').classList.add('hidden');
+    }
     return;
   }
   document.getElementById('btnStartCamera').classList.remove('hidden');
@@ -129,10 +223,14 @@ function showOcrResult(result) {
     html += `<div style="margin-bottom:8px; font-size:0.75rem; color:var(--text-secondary);">置信度: ${Math.round(result.confidence)}%</div>`;
   }
 
+  selectedBatchCodeIdx = 0;
   if (codes.length > 0) {
     html += `<div style="margin-bottom:8px; padding:8px; background:rgba(108,140,255,0.2); border-radius:8px; text-align:center;">`;
-    html += `<div style="font-size:0.7rem; color:var(--accent); margin-bottom:4px;">已提取零件编号</div>`;
-    html += codes.map(c => `<div style="font-size:1.1rem; font-weight:700; letter-spacing:2px; color:#fff; font-variant-numeric:tabular-nums;">${escapeHtml(c)}</div>`).join('');
+    html += `<div style="font-size:0.7rem; color:var(--accent); margin-bottom:4px;">已提取零件编号${codes.length > 1 ? '（点击选择）' : ''}</div>`;
+    html += codes.map((c, i) => {
+      const isActive = i === 0 ? 'ocr-code-active' : '';
+      return `<div class="ocr-code-select ${isActive}" data-ocr-idx="${i}" style="font-size:1.1rem; font-weight:700; letter-spacing:2px; font-variant-numeric:tabular-nums; cursor:pointer; padding:4px 8px; margin:2px 0; border-radius:6px; transition:background 0.15s;">${escapeHtml(c)}</div>`;
+    }).join('');
     html += `</div>`;
   }
 
@@ -140,6 +238,17 @@ function showOcrResult(result) {
   html += `<div style="padding:10px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); border-radius:8px; font-size:0.85rem; line-height:1.6; white-space:pre-wrap; word-break:break-all;">${raw ? escapeHtml(raw) : '<span style="opacity:0.4;">(空)</span>'}</div>`;
 
   content.innerHTML = html;
+
+  // 批量模式 + 多编号：绑定点击选择事件
+  if (isBatchMode() && codes.length > 1) {
+    content.querySelectorAll('.ocr-code-select').forEach(el => {
+      el.addEventListener('click', function () {
+        content.querySelectorAll('.ocr-code-select').forEach(e => e.classList.remove('ocr-code-active'));
+        this.classList.add('ocr-code-active');
+        selectedBatchCodeIdx = parseInt(this.dataset.ocrIdx) || 0;
+      });
+    });
+  }
 
   pendingOcrResult = { raw: result.raw, codes, confidence: result.confidence };
   el.classList.remove('hidden');
@@ -189,7 +298,7 @@ async function openPositionPicker() {
   document.getElementById('positionCode').value = codes[0] || '';
 
   const shelfId = Shelf.getActiveShelfId();
-  const parts = await DB.getByShelf(shelfId);
+  const parts = await DataStore.getByShelf(shelfId);
   const occupied = new Set();
   parts.forEach(p => {
     if (p.shelfRow != null && p.shelfCol != null) {
@@ -242,7 +351,7 @@ async function confirmPosition() {
   const codes = pendingOcrResult.codes || [];
   const finalCode = code || codes[0] || '';
 
-  await DB.add({
+  await DataStore.addPart({
     name: '',
     code: finalCode,
     specs: '',
@@ -513,15 +622,20 @@ async function batchConfirm() {
   if (!batchState) return;
   const bs = batchState;
 
-  const code = document.getElementById('positionCode')?.value?.trim() || '';
   const codes = pendingOcrResult?.codes || [];
-  const finalCode = code || codes[0] || '';
+  const finalCode = codes[selectedBatchCodeIdx] || codes[0] || '';
 
-  // 检查是否是覆盖
+  // 检查是否是覆盖，若是则先删除旧零件
   const key = `${bs.currentRow}_${bs.currentCol}`;
   const isOverwrite = bs.occupied.has(key);
 
-  await DB.add({
+  if (isOverwrite) {
+    const existing = await DataStore.getByPosition(bs.currentRow, bs.currentCol, bs.shelfId);
+    if (existing) await DataStore.removePart(existing.id);
+    bs.overwriteCount++;
+  }
+
+  await DataStore.addPart({
     name: '',
     code: finalCode,
     specs: '',
@@ -532,9 +646,6 @@ async function batchConfirm() {
     shelfId: bs.shelfId,
   });
 
-  if (isOverwrite) {
-    bs.overwriteCount++;
-  }
   bs.occupied.add(key);
   bs.count++;
 
@@ -582,13 +693,22 @@ function batchRetry() {
 async function batchManual() {
   if (!batchState) return;
   const bs = batchState;
-  const code = prompt('请输入 10 位零件编号：');
+  const defaultCode = (pendingOcrResult && pendingOcrResult.codes && pendingOcrResult.codes.length > 0)
+    ? pendingOcrResult.codes[0]
+    : '';
+  const code = prompt('请输入 10 位零件编号：', defaultCode);
   if (!code || !code.trim()) return;
 
   const key = `${bs.currentRow}_${bs.currentCol}`;
   const isOverwrite = bs.occupied.has(key);
 
-  await DB.add({
+  if (isOverwrite) {
+    const existing = await DataStore.getByPosition(bs.currentRow, bs.currentCol, bs.shelfId);
+    if (existing) await DataStore.removePart(existing.id);
+    bs.overwriteCount++;
+  }
+
+  await DataStore.addPart({
     name: '',
     code: code.trim(),
     specs: '',
@@ -599,9 +719,6 @@ async function batchManual() {
     shelfId: bs.shelfId,
   });
 
-  if (isOverwrite) {
-    bs.overwriteCount++;
-  }
   bs.occupied.add(key);
   bs.count++;
 
@@ -613,6 +730,7 @@ async function batchManual() {
 
   bs.currentRow = next.row;
   bs.currentCol = next.col;
+  resetScanUI();
   updateBatchStatus();
   showToast(`已手动录入 · 下一位置：${next.row + 1} 行 ${next.col + 1} 列`);
 }
@@ -766,13 +884,596 @@ function bindEvents() {
       }
     }, 250);
   });
+
+  // ---- 空间/账号相关 ----
+
+  // Header 按钮
+  document.getElementById('btnProfile').addEventListener('click', () => {
+    renderSpaceModal();
+    document.getElementById('modalSpace').classList.remove('hidden');
+  });
+  document.getElementById('spaceBadge').addEventListener('click', () => {
+    renderSpaceModal();
+    document.getElementById('modalSpace').classList.remove('hidden');
+  });
+
+  // 空间弹窗关闭
+  document.getElementById('modalSpace').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalSpace').classList.add('hidden');
+  });
+
+  // 动态按钮（通过事件委托绑定到 modalSpace）
+  document.getElementById('modalSpace').addEventListener('click', (e) => {
+    if (e.target.id === 'btnSpaceLogin') {
+      document.getElementById('modalSpace').classList.add('hidden');
+      showLogin();
+    }
+    if (e.target.id === 'btnSpaceRegister') {
+      document.getElementById('modalSpace').classList.add('hidden');
+      showRegister();
+    }
+    if (e.target.id === 'btnCreateTeam') {
+      document.getElementById('modalSpace').classList.add('hidden');
+      resetCreateTeam();
+      document.getElementById('modalCreateTeam').classList.remove('hidden');
+    }
+    if (e.target.id === 'btnJoinTeam') {
+      document.getElementById('modalSpace').classList.add('hidden');
+      document.getElementById('joinTeamId').value = '';
+      document.getElementById('joinInviteCode').value = '';
+      document.getElementById('joinTeamError').classList.add('hidden');
+      document.getElementById('modalJoinTeam').classList.remove('hidden');
+    }
+    if (e.target.id === 'btnLogoutModal') {
+      doLogout();
+    }
+  });
+
+  // 空间视图内按钮
+  document.getElementById('spaceContent').addEventListener('click', (e) => {
+    if (e.target.id === 'btnShowLogin') showLogin();
+    if (e.target.id === 'btnShowRegister') showRegister();
+    if (e.target.id === 'btnCreateTeamInline') {
+      resetCreateTeam();
+      document.getElementById('modalCreateTeam').classList.remove('hidden');
+    }
+    if (e.target.id === 'btnJoinTeamInline') {
+      document.getElementById('joinTeamId').value = '';
+      document.getElementById('joinInviteCode').value = '';
+      document.getElementById('joinTeamError').classList.add('hidden');
+      document.getElementById('modalJoinTeam').classList.remove('hidden');
+    }
+  });
+
+  // 登录弹窗
+  document.getElementById('formLogin').addEventListener('submit', doLogin);
+  document.getElementById('btnLoginCancel').addEventListener('click', () => {
+    document.getElementById('modalLogin').classList.add('hidden');
+  });
+  document.getElementById('modalLogin').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalLogin').classList.add('hidden');
+  });
+  document.getElementById('btnGotoRegister').addEventListener('click', () => {
+    document.getElementById('modalLogin').classList.add('hidden');
+    showRegister();
+  });
+
+  // 注册弹窗
+  document.getElementById('formRegister').addEventListener('submit', doRegister);
+  document.getElementById('btnRegCancel').addEventListener('click', () => {
+    document.getElementById('modalRegister').classList.add('hidden');
+  });
+  document.getElementById('modalRegister').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalRegister').classList.add('hidden');
+  });
+  document.getElementById('btnGotoLogin').addEventListener('click', () => {
+    document.getElementById('modalRegister').classList.add('hidden');
+    showLogin();
+  });
+
+  // 创建团队弹窗
+  document.getElementById('formCreateTeam').addEventListener('submit', doCreateTeam);
+  document.getElementById('btnCreateTeamCancel').addEventListener('click', () => {
+    document.getElementById('modalCreateTeam').classList.add('hidden');
+  });
+  document.getElementById('modalCreateTeam').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalCreateTeam').classList.add('hidden');
+  });
+  document.getElementById('btnCreateTeamDone').addEventListener('click', () => {
+    document.getElementById('modalCreateTeam').classList.add('hidden');
+  });
+
+  // 加入团队弹窗
+  document.getElementById('formJoinTeam').addEventListener('submit', doJoinTeam);
+  document.getElementById('btnJoinTeamCancel').addEventListener('click', () => {
+    document.getElementById('modalJoinTeam').classList.add('hidden');
+  });
+  document.getElementById('modalJoinTeam').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalJoinTeam').classList.add('hidden');
+  });
+
+  // 数据迁移弹窗
+  document.getElementById('modalMigration').querySelector('.modal-backdrop').addEventListener('click', () => {
+    document.getElementById('modalMigration').classList.add('hidden');
+  });
+}
+
+// ===== 空间管理 UI =====
+
+async function loadSpaces() {
+  const spaces = await DB.getSpaces();
+  if (spaces.length === 0) {
+    await DB.createSpace('personal', '个人空间', 'personal', null);
+  }
+}
+
+function updateSpaceBadge() {
+  const badge = document.getElementById('spaceBadge');
+  const space = TeamManager.getCurrentSpace();
+  if (space) {
+    const name = space.name || '个人';
+    badge.textContent = name.length > 6 ? name.slice(0, 6) + '...' : name;
+  }
+}
+
+async function updateSyncBadge() {
+  const count = await API.getQueueLength();
+  const btn = document.getElementById('btnProfile');
+  if (count > 0) {
+    btn.textContent = '👤' + count;
+  } else {
+    btn.textContent = '👤';
+  }
+}
+
+function renderSpaceView() {
+  const prompt = document.getElementById('spaceLoginPrompt');
+  const teamList = document.getElementById('spaceTeamList');
+
+  if (!Auth.isLoggedIn()) {
+    prompt.classList.remove('hidden');
+    teamList.classList.add('hidden');
+    return;
+  }
+
+  prompt.classList.add('hidden');
+  teamList.classList.remove('hidden');
+
+  const spaces = [];
+  // 个人空间
+  spaces.push({ id: 'personal', name: '个人空间', type: 'personal', member_count: 0, role: 'owner' });
+  // 团队空间
+  const teams = TeamManager.getTeams();
+  teams.forEach(t => {
+    spaces.push({ id: `team_${t.id}`, name: t.name, type: 'team', member_count: t.member_count, role: t.role });
+  });
+
+  const currentId = TeamManager.getCurrentSpace()?.id || 'personal';
+
+  let html = '';
+  spaces.forEach(s => {
+    const isActive = s.id === currentId;
+    const icon = s.type === 'personal' ? '🏠' : '👥';
+    const meta = s.type === 'personal' ? '个人专属' : `${s.member_count || 0} 成员 · ${s.role || 'member'}`;
+    html += `
+      <div class="space-card ${isActive ? 'active' : ''}" data-space-id="${s.id}">
+        <div class="space-card-icon">${icon}</div>
+        <div class="space-card-info">
+          <div class="space-card-name">${escapeHtml(s.name)}</div>
+          <div class="space-card-meta">${meta}</div>
+        </div>
+      </div>`;
+  });
+
+  html += `
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <button id="btnCreateTeamInline" class="btn-secondary" style="flex:1;">+ 创建团队</button>
+      <button id="btnJoinTeamInline" class="btn-secondary" style="flex:1;">+ 加入团队</button>
+    </div>`;
+
+  teamList.innerHTML = html;
+
+  // 绑定空间卡片点击
+  teamList.querySelectorAll('.space-card').forEach(card => {
+    card.addEventListener('click', async () => {
+      const spaceId = card.dataset.spaceId;
+      await TeamManager.switchSpace(spaceId);
+      updateSpaceBadge();
+      renderSpaceView();
+      await Shelf.render();
+    });
+  });
+}
+
+function updateSpaceUI() {
+  renderSpaceView();
+  updateSpaceBadge();
+}
+
+function renderSpaceModal() {
+  const list = document.getElementById('spaceList');
+  const userInfo = document.getElementById('spaceUserInfo');
+  const actions = document.getElementById('spaceActions');
+
+  if (!Auth.isLoggedIn()) {
+    list.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">请先登录</p>';
+    actions.innerHTML = '<button id="btnSpaceLogin" class="btn-primary" style="width:100%;">登录</button><button id="btnSpaceRegister" class="btn-secondary" style="width:100%;margin-top:8px;">注册</button>';
+    userInfo.classList.add('hidden');
+  } else {
+    const spaces = [];
+    spaces.push({ id: 'personal', name: '个人空间', type: 'personal', meta: '个人专属' });
+    const teams = TeamManager.getTeams();
+    teams.forEach(t => {
+      spaces.push({ id: `team_${t.id}`, name: t.name, type: 'team', meta: `${t.member_count || 0} 成员 · ${t.role || 'member'}` });
+    });
+
+    const currentId = TeamManager.getCurrentSpace()?.id || 'personal';
+    list.innerHTML = spaces.map(s => {
+      const icon = s.type === 'personal' ? '🏠' : '👥';
+      const active = s.id === currentId ? 'active' : '';
+      return `<div class="space-card ${active}" data-space-id="${s.id}" data-team-id="${s.type === 'team' ? s.id.replace('team_', '') : ''}">
+        <div class="space-card-icon">${icon}</div>
+        <div class="space-card-info">
+          <div class="space-card-name">${escapeHtml(s.name)}</div>
+          <div class="space-card-meta">${s.meta}</div>
+        </div>
+        ${s.type === 'team' ? '<button class="btn-secondary team-manage-btn" style="font-size:0.65rem;padding:3px 8px;flex-shrink:0;">管理</button>' : ''}
+      </div>`;
+    }).join('');
+
+    userInfo.innerHTML = `
+      <p style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:8px;">👤 ${escapeHtml(Auth.getUser()?.display_name || Auth.getUser()?.username || '')}</p>
+      <button id="btnLogoutModal" class="btn-secondary" style="color:var(--danger);font-size:0.8rem;">退出登录</button>`;
+    userInfo.classList.remove('hidden');
+
+    // 空间切换
+    list.querySelectorAll('.space-card').forEach(card => {
+      card.addEventListener('click', async (e) => {
+        if (e.target.closest('.team-manage-btn')) return;
+        const spaceId = card.dataset.spaceId;
+        await TeamManager.switchSpace(spaceId);
+        updateSpaceBadge();
+        await Shelf.render();
+        document.getElementById('modalSpace').classList.add('hidden');
+      });
+    });
+
+    // 团队管理按钮
+    list.querySelectorAll('.team-manage-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const card = btn.closest('.space-card');
+        const teamId = parseInt(card.dataset.teamId);
+        openTeamManage(teamId);
+        document.getElementById('modalSpace').classList.add('hidden');
+      });
+    });
+  }
+}
+
+// ---- 登录/注册 ----
+
+function showLogin() {
+  document.getElementById('loginUsername').value = '';
+  document.getElementById('loginPassword').value = '';
+  document.getElementById('loginError').classList.add('hidden');
+  document.getElementById('modalLogin').classList.remove('hidden');
+}
+
+function showRegister() {
+  document.getElementById('regUsername').value = '';
+  document.getElementById('regPassword').value = '';
+  document.getElementById('regPassword2').value = '';
+  document.getElementById('regError').classList.add('hidden');
+  document.getElementById('modalRegister').classList.remove('hidden');
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const errEl = document.getElementById('loginError');
+
+  if (!username || !password) return;
+
+  try {
+    await Auth.login(username, password);
+    appMode = 'connected';
+    document.getElementById('modalLogin').classList.add('hidden');
+    await TeamManager.loadTeams();
+    updateSpaceUI();
+    await Shelf.render();
+    showToast('登录成功');
+    // 检查是否有本地数据需要迁移
+    checkMigration();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function doRegister(e) {
+  e.preventDefault();
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const password2 = document.getElementById('regPassword2').value;
+  const errEl = document.getElementById('regError');
+
+  if (!username || !password) return;
+  if (password !== password2) {
+    errEl.textContent = '两次密码不一致';
+    errEl.classList.remove('hidden');
+    return;
+  }
+  if (password.length < 6) {
+    errEl.textContent = '密码至少 6 位';
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  try {
+    await Auth.register(username, '', password);
+    appMode = 'connected';
+    document.getElementById('modalRegister').classList.add('hidden');
+    await TeamManager.loadTeams();
+    updateSpaceUI();
+    await Shelf.render();
+    showToast('注册成功');
+    checkMigration();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function doLogout() {
+  Auth.logout();
+  appMode = 'local';
+  await TeamManager.switchSpace('personal');
+  document.getElementById('modalSpace').classList.add('hidden');
+  updateSpaceUI();
+  await Shelf.render();
+  showToast('已退出登录，数据保留在本地');
+}
+
+// ---- 团队管理 ----
+
+async function doCreateTeam(e) {
+  e.preventDefault();
+  const name = document.getElementById('createTeamName').value.trim();
+  const desc = document.getElementById('createTeamDesc').value.trim();
+  const errEl = document.getElementById('createTeamError');
+
+  if (!name) return;
+
+  try {
+    const team = await TeamManager.createTeam(name, desc);
+    // 显示邀请码
+    document.getElementById('formCreateTeam').classList.add('hidden');
+    document.getElementById('createTeamResult').classList.remove('hidden');
+    document.getElementById('inviteCodeDisplay').textContent = team.invite_code || 'N/A';
+    updateSpaceUI();
+    await Shelf.render();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+function resetCreateTeam() {
+  document.getElementById('formCreateTeam').classList.remove('hidden');
+  document.getElementById('createTeamResult').classList.add('hidden');
+  document.getElementById('createTeamName').value = '';
+  document.getElementById('createTeamDesc').value = '';
+  document.getElementById('createTeamError').classList.add('hidden');
+}
+
+async function doJoinTeam(e) {
+  e.preventDefault();
+  const teamId = parseInt(document.getElementById('joinTeamId').value);
+  const inviteCode = document.getElementById('joinInviteCode').value.trim();
+  const errEl = document.getElementById('joinTeamError');
+
+  if (!teamId || !inviteCode) return;
+
+  try {
+    await TeamManager.joinTeamById(teamId, inviteCode);
+    document.getElementById('modalJoinTeam').classList.add('hidden');
+    await TeamManager.loadTeams();
+    await TeamManager.switchSpace(`team_${teamId}`);
+    updateSpaceUI();
+    await Shelf.render();
+    showToast('成功加入团队');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.classList.remove('hidden');
+  }
+}
+
+async function openTeamManage(teamId) {
+  const modal = document.getElementById('modalTeamManage');
+  const title = document.getElementById('teamManageTitle');
+  const inviteEl = document.getElementById('teamManageInviteCode');
+  const memberList = document.getElementById('teamMemberList');
+  const btnLeave = document.getElementById('btnLeaveTeam');
+  const btnDelete = document.getElementById('btnDeleteTeam');
+  const btnManageClose = document.getElementById('btnTeamManageClose');
+
+  try {
+    const team = await API.get(`/api/teams/${teamId}`);
+    title.textContent = `管理: ${team.data.name}`;
+    inviteEl.textContent = team.data.invite_code || '无';
+
+    const members = await TeamManager.getMembers(teamId);
+    const currentUser = Auth.getUser();
+    const isOwner = members.find(m => m.id === currentUser?.id)?.role === 'owner';
+
+    memberList.innerHTML = members.map(m => `
+      <div class="member-row">
+        <div class="member-row-left">
+          <span>👤 ${escapeHtml(m.display_name || m.username)}</span>
+          <span class="member-role-tag ${m.role === 'owner' ? 'owner' : ''}">${m.role === 'owner' ? '创建者' : m.role === 'admin' ? '管理员' : '成员'}</span>
+          ${m.id === currentUser?.id ? '<span style="font-size:0.6rem;color:var(--text-secondary);">你</span>' : ''}
+        </div>
+        ${isOwner && m.role !== 'owner' ? `
+          <div class="member-actions">
+            <button data-action="toggleRole" data-uid="${m.id}" data-role="${m.role}">${m.role === 'admin' ? '降为成员' : '升为管理员'}</button>
+            <button data-action="remove" data-uid="${m.id}" style="color:var(--danger);">移除</button>
+          </div>` : ''}
+      </div>
+    `).join('');
+
+    // 成员操作
+    memberList.querySelectorAll('[data-action="toggleRole"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = parseInt(btn.dataset.uid);
+        const newRole = btn.dataset.role === 'admin' ? 'member' : 'admin';
+        try {
+          await TeamManager.updateMemberRole(teamId, uid, newRole);
+          showToast('角色已更新');
+          openTeamManage(teamId);
+        } catch (err) { showToast(err.message); }
+      });
+    });
+    memberList.querySelectorAll('[data-action="remove"]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = parseInt(btn.dataset.uid);
+        if (!confirm('确定移除该成员？')) return;
+        try {
+          await TeamManager.removeMember(teamId, uid);
+          showToast('成员已移除');
+          openTeamManage(teamId);
+        } catch (err) { showToast(err.message); }
+      });
+    });
+
+    // 重新生成邀请码
+    document.getElementById('btnRegenInvite').onclick = async () => {
+      try {
+        const code = await TeamManager.regenerateInvite(teamId);
+        inviteEl.textContent = code;
+        showToast('邀请码已更新');
+      } catch (err) { showToast(err.message); }
+    };
+
+    btnLeave.style.display = isOwner ? 'none' : '';
+    btnDelete.style.display = isOwner ? '' : 'none';
+
+    btnLeave.onclick = async () => {
+      if (!confirm('确定离开该团队？')) return;
+      try {
+        await TeamManager.leaveTeam(teamId);
+        modal.classList.add('hidden');
+        updateSpaceUI();
+        await Shelf.render();
+        showToast('已离开团队');
+      } catch (err) { showToast(err.message); }
+    };
+
+    btnDelete.onclick = async () => {
+      if (!confirm('确定删除该团队？所有数据将被永久删除！')) return;
+      try {
+        await TeamManager.deleteTeam(teamId);
+        modal.classList.add('hidden');
+        updateSpaceUI();
+        await Shelf.render();
+        showToast('团队已删除');
+      } catch (err) { showToast(err.message); }
+    };
+
+    btnManageClose.onclick = () => modal.classList.add('hidden');
+
+    modal.classList.remove('hidden');
+  } catch (err) {
+    showToast('加载团队信息失败: ' + err.message);
+  }
+}
+
+// ---- 数据迁移 ----
+
+async function checkMigration() {
+  if (!Auth.isLoggedIn()) return;
+  // 检查是否有本地未上传的货架数据
+  const shelves = await DB.getAllShelves();
+  const localShelves = shelves.filter(s => !s.server_id || s.server_id === null);
+  if (localShelves.length === 0) return;
+
+  document.getElementById('migrationText').textContent =
+    `检测到本地有 ${localShelves.length} 个货架的离线数据。是否上传到云端？`;
+  document.getElementById('modalMigration').classList.remove('hidden');
+  document.getElementById('migrationProgress').classList.add('hidden');
+  document.querySelector('#modalMigration .modal-actions').classList.remove('hidden');
+
+  document.getElementById('btnMigrationUpload').onclick = async () => {
+    document.getElementById('migrationProgress').classList.remove('hidden');
+    document.querySelector('#modalMigration .modal-actions').classList.add('hidden');
+
+    for (const shelf of localShelves) {
+      const parts = await DataStore.getByShelf(shelf.id);
+      // 在个人空间创建货架
+      const res = await API.post('/api/personal/shelves', { name: shelf.name });
+      const serverShelf = res.data;
+      await DB.updateShelfServerId(shelf.id, serverShelf.id);
+      // 批量上传零件
+      if (parts.length > 0) {
+        const batches = [];
+        for (let i = 0; i < parts.length; i += 50) {
+          batches.push(parts.slice(i, i + 50));
+        }
+        for (const batch of batches) {
+          await API.post(`/api/personal/shelves/${serverShelf.id}/parts/batch`, {
+            parts: batch.map(p => ({
+              name: p.name, code: p.code, specs: p.specs,
+              quantity: p.quantity, note: p.note,
+              shelfRow: p.shelfRow, shelfCol: p.shelfCol,
+            })),
+          });
+        }
+      }
+    }
+
+    document.getElementById('modalMigration').classList.add('hidden');
+    showToast(`已上传 ${localShelves.length} 个货架的数据`);
+    await Shelf.render();
+  };
+
+  document.getElementById('btnMigrationSkip').onclick = () => {
+    document.getElementById('modalMigration').classList.add('hidden');
+  };
 }
 
 // ===== 初始化 =====
 async function init() {
   bindEvents();
   await DB.open();
+  await Auth.init();
+  appMode = Auth.isLoggedIn() ? 'connected' : 'local';
+  await TeamManager.init();
+  await loadSpaces();
+
+  // 如果已登录，加载团队列表
+  if (Auth.isLoggedIn()) {
+    await TeamManager.loadTeams();
+    updateSpaceUI();
+  }
+
   await Shelf.init();
+  updateSpaceBadge();
+
+  // 在线/离线事件
+  window.addEventListener('online', () => {
+    document.getElementById('offlineIndicator').classList.add('hidden');
+    API.flushQueue();
+  });
+  window.addEventListener('offline', () => {
+    document.getElementById('offlineIndicator').classList.remove('hidden');
+  });
+  if (!navigator.onLine) {
+    document.getElementById('offlineIndicator').classList.remove('hidden');
+  }
+
+  // 检查同步队列
+  updateSyncBadge();
 
   if ('serviceWorker' in navigator) {
     try {
