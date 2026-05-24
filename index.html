@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#F2F2F7">
+  <meta name="description" content="本地化 OCR 货架管理系统">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="src/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="src/icons/icon-192.png">
+  <title>货架管理</title>
+  <link rel="stylesheet" href="src/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/sql.js@1.10/dist/sql-wasm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+
+  <!-- 流动背景光斑 -->
+  <div class="bg-blobs">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <!-- 顶部标题栏 -->
+  <header class="header">
+    <h1>📦 货架管理 <span style="font-size:0.65rem;opacity:0.45;font-weight:400;margin-left:2px;">v1.2</span></h1>
+    <button id="btnExport" class="btn-icon" title="导出 Excel">📥</button>
+  </header>
+
+  <!-- 主内容区 -->
+  <main class="main">
+    <!-- 扫描视图 -->
+    <section id="viewScan" class="view active">
+      <div class="scan-container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas" class="hidden"></canvas>
+        <div id="scanPlaceholder" class="scan-placeholder glass-card">
+          <div class="scan-icon">📷</div>
+          <p>点击下方按钮启动摄像头</p>
+        </div>
+        <div id="ocrProgress" class="ocr-progress hidden">
+          <div class="spinner"></div>
+          <p id="ocrProgressText">识别中...</p>
+        </div>
+        <div id="ocrResult" class="ocr-result glass-card hidden">
+          <div class="ocr-result-header">识别结果</div>
+          <div id="ocrResultContent" class="ocr-result-content"></div>
+          <div class="ocr-result-actions">
+            <button id="btnOcrConfirm" class="btn-primary">确认并存入货架</button>
+            <button id="btnOcrRetry" class="btn-secondary">重新识别</button>
+          </div>
+        </div>
+      </div>
+      <div class="scan-actions">
+        <button id="btnCapture" class="btn-capture hidden">📸 拍照识别</button>
+        <button id="btnStartCamera" class="btn-capture">📷 打开摄像头</button>
+        <button id="btnStopCamera" class="btn-secondary hidden">关闭摄像头</button>
+      </div>
+    </section>
+
+    <!-- 货架视图 -->
+    <section id="viewShelf" class="view">
+      <div class="shelf-nav">
+        <button id="btnShelfPrev" class="btn-nav-arrow" title="上一个货架">◀</button>
+        <span id="shelfName" class="shelf-name">货架 1</span>
+        <button id="btnShelfNext" class="btn-nav-arrow" title="下一个货架">▶</button>
+        <button id="btnShelfAdd" class="btn-nav-add" title="新建货架">＋</button>
+      </div>
+      <div id="shelfSwipeArea" class="shelf-swipe-area">
+        <div id="shelfGrid" class="shelf-grid"></div>
+      </div>
+      <div class="shelf-info">
+        <span id="shelfStats">共 0 个零件</span>
+        <span id="shelfIndicator" class="shelf-indicator"></span>
+      </div>
+    </section>
+  </main>
+
+  <!-- 底部导航栏 -->
+  <nav class="tab-bar">
+    <button class="tab active" data-view="viewScan">📷 扫描</button>
+    <button class="tab" data-view="viewShelf">📋 货架</button>
+  </nav>
+
+  <!-- 货架位置选择弹窗 -->
+  <div id="modalPosition" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>选择货架位置</h3>
+      <label>零件编号（10位）</label>
+      <input type="text" id="positionCode" pattern="\d{10}" maxlength="10" inputmode="numeric" placeholder="10位数字编号">
+      <div class="position-grid" id="positionGrid"></div>
+      <div class="modal-actions">
+        <button id="btnPositionCancel" class="btn-secondary">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 零件详情弹窗 -->
+  <div id="modalDetail" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>零件详情</h3>
+      <form id="formDetail">
+        <input type="hidden" id="detailId">
+        <label>编号（10位）</label>
+        <input type="text" id="detailCode" pattern="\d{10}" maxlength="10" inputmode="numeric" placeholder="10位数字编号">
+        <label>名称</label>
+        <input type="text" id="detailName">
+        <label>规格</label>
+        <input type="text" id="detailSpecs">
+        <label>数量</label>
+        <input type="number" id="detailQuantity" min="0" value="1">
+        <label>备注</label>
+        <textarea id="detailNote" rows="2"></textarea>
+        <div id="detailPosition" class="detail-position"></div>
+        <div class="modal-actions">
+          <button type="button" id="btnDetailDelete" class="btn-danger">删除</button>
+          <button type="button" id="btnDetailCancel" class="btn-secondary">取消</button>
+          <button type="submit" class="btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="src/js/db.js"></script>
+  <script src="src/js/camera.js"></script>
+  <script src="src/js/ocr.js"></script>
+  <script src="src/js/shelf.js"></script>
+  <script src="src/js/export.js"></script>
+  <script src="src/js/app.js"></script>
+</body>
+</html>

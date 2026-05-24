@@ -1,0 +1,22 @@
+{
+  "name": "货架管理 - OCR 零件管理",
+  "short_name": "货架管理",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#F2F2F7",
+  "background_color": "#F2F2F7",
+  "description": "本地化 OCR 货架管理系统",
+  "icons": [
+    {
+      "src": "src/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "src/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
