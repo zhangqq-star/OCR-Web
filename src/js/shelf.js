@@ -23,13 +23,7 @@ const Shelf = (() => {
   // ---- 初始化 ----
 
   async function init() {
-    // 使用 TeamManager 加载当前空间的货架
-    if (typeof TeamManager !== 'undefined') {
-      shelves = await TeamManager.getShelves();
-    }
-    if (!shelves || shelves.length === 0) {
-      shelves = await DB.getAllShelves();
-    }
+    shelves = await DB.getAllShelves();
     if (shelves.length === 0) {
       const id = await DB.createShelf('货架 1');
       await DB.migratePartsToShelf(id);
@@ -49,14 +43,8 @@ const Shelf = (() => {
   async function createShelf() {
     const name = prompt('请输入货架名称：', `货架 ${shelves.length + 1}`);
     if (!name || !name.trim()) return;
-    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
-      await TeamManager.createShelf(name.trim());
-      shelves = await TeamManager.getShelves();
-    } else {
-      const spaceId = typeof TeamManager !== 'undefined' ? TeamManager.getCurrentSpace()?.id : 'personal';
-      await DB.createShelf(name.trim(), spaceId);
-      shelves = await DB.getAllShelves(spaceId);
-    }
+    await DB.createShelf(name.trim());
+    shelves = await DB.getAllShelves();
     if (shelves.length > 0) await switchTo(shelves[shelves.length - 1].id);
     await render();
   }
@@ -66,11 +54,7 @@ const Shelf = (() => {
     if (!current) return;
     const name = prompt('重命名货架：', current.name);
     if (!name || !name.trim() || name.trim() === current.name) return;
-    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
-      await TeamManager.renameShelf(activeShelfId, name.trim());
-    } else {
-      await DB.updateShelf(activeShelfId, name.trim());
-    }
+    await DB.updateShelf(activeShelfId, name.trim());
     shelves = await DataStore.getAllShelves();
     render();
   }
@@ -85,13 +69,8 @@ const Shelf = (() => {
       ? `该货架有 ${parts.length} 个零件，删除货架将同时删除所有零件，确定吗？`
       : '确定要删除该货架吗？';
     if (!confirm(msg)) return;
-    if (typeof TeamManager !== 'undefined' && TeamManager.isTeamSpace()) {
-      await TeamManager.deleteShelf(activeShelfId);
-      shelves = await TeamManager.getShelves();
-    } else {
-      await DB.deleteShelf(activeShelfId);
-      shelves = await DB.getAllShelves();
-    }
+    await DB.deleteShelf(activeShelfId);
+    shelves = await DB.getAllShelves();
     activeShelfId = shelves[0].id;
     localStorage.setItem('activeShelfId', activeShelfId);
     await render();
@@ -218,7 +197,6 @@ const Shelf = (() => {
 
     updateNavButtons();
     updateStats(parts.length);
-    // 若存在重复位置（旧数据），输出警告以便排查
     if (parts.length > Object.keys(byPos).length) {
       console.warn(`[Shelf] 检测到同一位置有多个零件：共 ${parts.length} 条记录，仅 ${Object.keys(byPos).length} 个不同位置`);
     }
@@ -256,7 +234,6 @@ const Shelf = (() => {
       }
     });
 
-    // 点击弹窗外任意位置取消
     setTimeout(() => {
       document.addEventListener('click', onDocumentClickDuringMove);
     }, 0);
@@ -274,7 +251,6 @@ const Shelf = (() => {
   }
 
   function onDocumentClickDuringMove(e) {
-    // 如果点击的是货架格子，让格子自己的 click 处理
     if (e.target.closest('.shelf-cell')) return;
     cancelMoveMode();
     showToast('已取消移动');
@@ -284,7 +260,6 @@ const Shelf = (() => {
     if (!movePart) return;
 
     if (targetPart && targetPart.id === movePart.id) {
-      // 点击原位 → 取消
       cancelMoveMode();
       showToast('已取消移动');
       return;
@@ -294,10 +269,8 @@ const Shelf = (() => {
     const srcCol = movePart.shelfCol;
 
     if (targetPart) {
-      // 交换
       swapParts(movePart, targetPart);
     } else {
-      // 移动到空位
       movePart.shelfRow = targetRow;
       movePart.shelfCol = targetCol;
       DB.update(movePart.id, movePart);
@@ -436,7 +409,6 @@ const Shelf = (() => {
     return div.innerHTML;
   }
 
-  // 全局 pointer 监听（用于长按取消）
   document.addEventListener('pointermove', onGlobalPointerMove);
   document.addEventListener('pointerup', onGlobalPointerUp);
 

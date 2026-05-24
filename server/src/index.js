@@ -4,21 +4,16 @@ const morgan = require('morgan');
 const path = require('path');
 const config = require('./config');
 const db = require('./db');
+const { requireAuth } = require('./middleware/auth');
 
 const authRoutes = require('./routes/auth');
-const teamRoutes = require('./routes/teams');
-const shelfRoutes = require('./routes/shelves');
-const partRoutes = require('./routes/parts');
-const logRoutes = require('./routes/logs');
 
 async function main() {
-  // 初始化数据库
   await db.open();
   console.log('[Server] 数据库已初始化');
 
   const app = express();
 
-  // 中间件
   app.use(cors());
   app.use(express.json({ limit: '10mb' }));
   app.use(morgan('dev'));
@@ -28,14 +23,8 @@ async function main() {
 
   // API 路由
   app.use('/api/auth', authRoutes);
-  app.use('/api/teams', teamRoutes);
-  app.use('/api/teams/:teamId/shelves', shelfRoutes);
-  app.use('/api/teams/:teamId/shelves/:shelfId/parts', partRoutes);
-  app.use('/api/teams/:teamId/logs', logRoutes);
 
-  // 个人空间路由
-  const { requireAuth } = require('./middleware/auth');
-
+  // 获取用户个人团队 ID
   function getPersonalTeamId(userId) {
     const row = db.get(
       `SELECT t.id FROM teams t
@@ -53,11 +42,6 @@ async function main() {
   app.get('/api/personal/shelves', (req, res) => {
     const teamId = getPersonalTeamId(req.user.id);
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
-    req.params = req.params || {};
-    req.params.teamId = String(teamId);
-    // 直接调用 shelfRoutes 中的逻辑 — 但无法直接复用
-    // 改用 DB 查询
-    const db = require('./db');
     const shelves = db.all('SELECT * FROM shelves WHERE team_id = ? ORDER BY created_at', [teamId]);
     return res.json({ ok: true, data: shelves });
   });
@@ -66,14 +50,11 @@ async function main() {
     const teamId = getPersonalTeamId(req.user.id);
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
     const { name } = req.body;
-    const db = require('./db');
-    const { logAction } = require('./utils/logger');
     db.run(
       'INSERT INTO shelves (team_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, unixepoch(), unixepoch())',
       [teamId, name || '货架 1', req.user.id]
     );
     const shelfId = db.lastInsertRowid();
-    logAction(req.user.id, teamId, 'shelf.create', 'shelf', shelfId, { name });
     const shelf = db.get('SELECT * FROM shelves WHERE id = ?', [shelfId]);
     return res.json({ ok: true, data: shelf });
   });
@@ -81,7 +62,6 @@ async function main() {
   app.get('/api/personal/shelves/:shelfId', (req, res) => {
     const teamId = getPersonalTeamId(req.user.id);
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
-    const db = require('./db');
     const shelf = db.get('SELECT * FROM shelves WHERE id = ? AND team_id = ?', [parseInt(req.params.shelfId), teamId]);
     if (!shelf) return res.status(404).json({ ok: false, error: '货架不存在' });
     return res.json({ ok: true, data: shelf });
@@ -92,7 +72,6 @@ async function main() {
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
     const { name } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ ok: false, error: '名称不能为空' });
-    const db = require('./db');
     db.run('UPDATE shelves SET name = ?, updated_at = unixepoch() WHERE id = ? AND team_id = ?', [name.trim(), parseInt(req.params.shelfId), teamId]);
     return res.json({ ok: true });
   });
@@ -100,7 +79,6 @@ async function main() {
   app.delete('/api/personal/shelves/:shelfId', (req, res) => {
     const teamId = getPersonalTeamId(req.user.id);
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
-    const db = require('./db');
     db.run('DELETE FROM shelves WHERE id = ? AND team_id = ?', [parseInt(req.params.shelfId), teamId]);
     return res.json({ ok: true });
   });
@@ -109,7 +87,6 @@ async function main() {
   app.get('/api/personal/shelves/:shelfId/parts', (req, res) => {
     const teamId = getPersonalTeamId(req.user.id);
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
-    const db = require('./db');
     const parts = db.all('SELECT * FROM parts WHERE shelf_id = ? ORDER BY shelf_row, shelf_col', [parseInt(req.params.shelfId)]);
     return res.json({ ok: true, data: parts });
   });
@@ -119,8 +96,6 @@ async function main() {
     if (!teamId) return res.status(500).json({ ok: false, error: '个人空间未找到' });
     const { name, code, specs, quantity, note, shelfRow, shelfCol } = req.body;
     const shelfId = parseInt(req.params.shelfId);
-    const db = require('./db');
-    const { logAction } = require('./utils/logger');
     if (shelfRow != null && shelfCol != null) {
       const dup = db.get('SELECT id FROM parts WHERE shelf_id = ? AND shelf_row = ? AND shelf_col = ? LIMIT 1', [shelfId, shelfRow, shelfCol]);
       if (dup) return res.status(409).json({ ok: false, error: '该位置已被占用' });
@@ -130,7 +105,6 @@ async function main() {
       [shelfId, name || '', code || '', specs || '', quantity || 1, note || '', shelfRow ?? null, shelfCol ?? null, req.user.id]
     );
     const partId = db.lastInsertRowid();
-    logAction(req.user.id, teamId, 'part.create', 'part', partId, { code, shelfRow, shelfCol });
     const part = db.get('SELECT * FROM parts WHERE id = ?', [partId]);
     return res.json({ ok: true, data: part });
   });
@@ -139,7 +113,6 @@ async function main() {
     const { name, code, specs, quantity, note, shelfRow, shelfCol } = req.body;
     const shelfId = parseInt(req.params.shelfId);
     const partId = parseInt(req.params.partId);
-    const db = require('./db');
     const existing = db.get('SELECT * FROM parts WHERE id = ? AND shelf_id = ?', [partId, shelfId]);
     if (!existing) return res.status(404).json({ ok: false, error: '零件不存在' });
     db.run(
@@ -151,7 +124,6 @@ async function main() {
   });
 
   app.delete('/api/personal/shelves/:shelfId/parts/:partId', (req, res) => {
-    const db = require('./db');
     db.run('DELETE FROM parts WHERE id = ? AND shelf_id = ?', [parseInt(req.params.partId), parseInt(req.params.shelfId)]);
     return res.json({ ok: true });
   });
@@ -162,7 +134,6 @@ async function main() {
     const { parts } = req.body;
     if (!Array.isArray(parts) || parts.length === 0) return res.status(400).json({ ok: false, error: '请提供零件列表' });
     const shelfId = parseInt(req.params.shelfId);
-    const db = require('./db');
     const ids = db.transaction(() => {
       const result = [];
       for (const p of parts) {
