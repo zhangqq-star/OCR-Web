@@ -23,11 +23,11 @@ const Shelf = (() => {
   // ---- 初始化 ----
 
   async function init() {
-    shelves = await DB.getAllShelves();
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
     if (shelves.length === 0) {
-      const id = await DB.createShelf('货架 1');
+      const id = await DB.createShelf('货架 1', Auth.getOwnerId());
       await DB.migratePartsToShelf(id);
-      shelves = await DB.getAllShelves();
+      shelves = await DB.getAllShelves(Auth.getOwnerId());
     }
     const savedId = localStorage.getItem('activeShelfId');
     if (savedId && shelves.find(s => s.id === Number(savedId))) {
@@ -43,8 +43,8 @@ const Shelf = (() => {
   async function createShelf() {
     const name = prompt('请输入货架名称：', `货架 ${shelves.length + 1}`);
     if (!name || !name.trim()) return;
-    await DB.createShelf(name.trim());
-    shelves = await DB.getAllShelves();
+    await DB.createShelf(name.trim(), Auth.getOwnerId());
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
     if (shelves.length > 0) await switchTo(shelves[shelves.length - 1].id);
     await render();
   }
@@ -55,7 +55,7 @@ const Shelf = (() => {
     const name = prompt('重命名货架：', current.name);
     if (!name || !name.trim() || name.trim() === current.name) return;
     await DB.updateShelf(activeShelfId, name.trim());
-    shelves = await DataStore.getAllShelves();
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
     render();
   }
 
@@ -70,7 +70,7 @@ const Shelf = (() => {
       : '确定要删除该货架吗？';
     if (!confirm(msg)) return;
     await DB.deleteShelf(activeShelfId);
-    shelves = await DB.getAllShelves();
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
     activeShelfId = shelves[0].id;
     localStorage.setItem('activeShelfId', activeShelfId);
     await render();

@@ -1,11 +1,11 @@
 /**
  * SQLite 数据层 — SQL.js + OPFS 持久化
  * 数据库: OcrShelfDB (SQLite)
- * Schema v3: 新增 _users 本地用户表
+ * Schema v4: shelves 增加 owner_id 实现用户数据隔离
  */
 const DB = (() => {
   const DB_FILE = 'ocrshelf.db';
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
   let db = null;
   let initPromise = null;
 
@@ -90,6 +90,7 @@ const DB = (() => {
         name TEXT NOT NULL,
         space_id TEXT DEFAULT 'personal',
         server_id INTEGER,
+        owner_id TEXT DEFAULT 'anon',
         createdAt INTEGER NOT NULL
       )
     `);
@@ -210,6 +211,21 @@ const DB = (() => {
     }
   }
 
+  // v3 → v4 迁移
+  function migrateV3toV4() {
+    try {
+      const info = db.exec("PRAGMA table_info('shelves')");
+      const cols = info.length > 0 ? info[0].values.map(r => r[1]) : [];
+      if (!cols.includes('owner_id')) {
+        db.run("ALTER TABLE shelves ADD COLUMN owner_id TEXT DEFAULT 'anon'");
+      }
+      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+      console.log('[DB] v3 → v4 迁移完成');
+    } catch (e) {
+      console.warn('[DB] 迁移失败（可能已是 v4）:', e.message);
+    }
+  }
+
   // ---- 查询辅助 ----
 
   function rowToPart(row) {
@@ -231,7 +247,7 @@ const DB = (() => {
 
   function rowToShelf(row) {
     if (!row) return null;
-    return { id: row[0], name: row[1], space_id: row[2], server_id: row[3], createdAt: row[4] };
+    return { id: row[0], name: row[1], space_id: row[2], server_id: row[3], owner_id: row[4], createdAt: row[5] };
   }
 
   // ---- 初始化 ----
@@ -261,6 +277,7 @@ const DB = (() => {
         db.run('PRAGMA foreign_keys = ON');
         migrateV1toV2();
         migrateV2toV3();
+        migrateV3toV4();
         console.log('[DB] 从 OPFS 加载已有数据库');
       } else {
         db = new SQL.Database();
@@ -276,20 +293,20 @@ const DB = (() => {
 
   // ---- Shelves ----
 
-  async function createShelf(name, spaceId) {
+  async function createShelf(name, ownerId) {
     await open();
-    const sid = spaceId || 'personal';
-    db.run('INSERT INTO shelves (name, space_id, createdAt) VALUES (?, ?, ?)', [name, sid, Date.now()]);
+    const oid = ownerId || 'anon';
+    db.run('INSERT INTO shelves (name, space_id, owner_id, createdAt) VALUES (?, ?, ?, ?)', [name, 'personal', oid, Date.now()]);
     const result = db.exec('SELECT last_insert_rowid()');
     scheduleSave();
     return result[0].values[0][0];
   }
 
-  async function getAllShelves(spaceId) {
+  async function getAllShelves(ownerId) {
     await open();
     let sql = 'SELECT * FROM shelves';
     let params = [];
-    if (spaceId) { sql += ' WHERE space_id = ?'; params.push(spaceId); }
+    if (ownerId) { sql += ' WHERE owner_id = ?'; params.push(ownerId); }
     sql += ' ORDER BY createdAt';
     const result = db.exec(sql, params);
     if (!result.length || !result[0].values.length) return [];

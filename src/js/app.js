@@ -27,7 +27,7 @@ const DataStore = {
   async getByShelf(shelfId) { return DB.getByShelf(shelfId); },
   async getByPosition(row, col, shelfId) { return DB.getByPosition(row, col, shelfId); },
   async get(id) { return DB.get(id); },
-  async getAllShelves() { return DB.getAllShelves(); },
+  async getAllShelves() { return DB.getAllShelves(Auth.getOwnerId()); },
 };
 
 // ===== Tab 切换 =====
@@ -305,7 +305,7 @@ function cancelPosition() {
 
 async function openBatchStartModal() {
   // 弹出货架选择
-  const shelves = await DB.getAllShelves();
+  const shelves = await DB.getAllShelves(Auth.getOwnerId());
   const select = document.getElementById('batchShelfSelect');
   select.innerHTML = shelves.map(s =>
     `<option value="${s.id}" ${s.id === Shelf.getActiveShelfId() ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
@@ -879,7 +879,7 @@ async function doLogin(e) {
     await Auth.login(username, password);
     document.getElementById('modalLogin').classList.add('hidden');
     updateAuthUI();
-    await Shelf.render();
+    await Shelf.init();
     showToast('登录成功');
   } catch (err) {
     errEl.textContent = err.message;
@@ -910,7 +910,7 @@ async function doRegister(e) {
     await Auth.register(username, password);
     document.getElementById('modalRegister').classList.add('hidden');
     updateAuthUI();
-    await Shelf.render();
+    await Shelf.init();
     showToast('注册成功');
   } catch (err) {
     errEl.textContent = err.message;
@@ -921,7 +921,7 @@ async function doRegister(e) {
 async function doLogout() {
   Auth.logout();
   updateAuthUI();
-  await Shelf.render();
+  await Shelf.init();
   showToast('已退出登录，数据保留在本地');
 }
 

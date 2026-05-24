@@ -8,6 +8,7 @@ const Auth = (() => {
   function getToken() { return token; }
   function getUser() { return currentUser; }
   function isLoggedIn() { return !!token && !!currentUser; }
+  function getOwnerId() { return currentUser ? String(currentUser.id) : 'anon'; }
 
   // ---- 密码哈希 (Web Crypto API) ----
 
@@ -115,5 +116,5 @@ const Auth = (() => {
     return bytes;
   }
 
-  return { init, isLoggedIn, getToken, getUser, login, register, logout, updateProfile };
+  return { init, isLoggedIn, getToken, getUser, getOwnerId, login, register, logout, updateProfile };
 })();
