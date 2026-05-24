@@ -1,11 +1,11 @@
 /**
  * SQLite 数据层 — SQL.js + OPFS 持久化
  * 数据库: OcrShelfDB (SQLite)
- * Schema v2: 新增 spaces、sync_queue，shelves 增加 space_id/server_id
+ * Schema v3: 新增 _users 本地用户表
  */
 const DB = (() => {
   const DB_FILE = 'ocrshelf.db';
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   let db = null;
   let initPromise = null;
 
@@ -134,6 +134,17 @@ const DB = (() => {
       )
     `);
 
+    // v3: 本地用户表
+    db.run(`
+      CREATE TABLE IF NOT EXISTS _users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT DEFAULT '',
+        created_at INTEGER NOT NULL
+      )
+    `);
+
     // 记录 schema 版本
     db.run('CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT)');
     db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
@@ -177,6 +188,25 @@ const DB = (() => {
       console.log('[DB] v1 → v2 迁移完成');
     } catch (e) {
       console.warn('[DB] 迁移失败（可能已是 v2）:', e.message);
+    }
+  }
+
+  // v2 → v3 迁移
+  function migrateV2toV3() {
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS _users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          display_name TEXT DEFAULT '',
+          created_at INTEGER NOT NULL
+        )
+      `);
+      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+      console.log('[DB] v2 → v3 迁移完成');
+    } catch (e) {
+      console.warn('[DB] 迁移失败（可能已是 v3）:', e.message);
     }
   }
 
@@ -230,6 +260,7 @@ const DB = (() => {
         db = new SQL.Database(savedData);
         db.run('PRAGMA foreign_keys = ON');
         migrateV1toV2();
+        migrateV2toV3();
         console.log('[DB] 从 OPFS 加载已有数据库');
       } else {
         db = new SQL.Database();
@@ -430,6 +461,42 @@ const DB = (() => {
     return result[0].values[0][0];
   }
 
+  // ---- Local Users (v3) ----
+
+  function rowToUser(row) {
+    if (!row) return null;
+    return { id: row[0], username: row[1], password_hash: row[2], display_name: row[3], created_at: row[4] };
+  }
+
+  async function createLocalUser(username, passwordHash) {
+    await open();
+    db.run(
+      'INSERT INTO _users (username, password_hash, display_name, created_at) VALUES (?, ?, ?, ?)',
+      [username, passwordHash, username, Date.now()]
+    );
+    const result = db.exec('SELECT last_insert_rowid()');
+    scheduleSave();
+    return result[0].values[0][0];
+  }
+
+  async function getLocalUser(username) {
+    await open();
+    const result = db.exec('SELECT * FROM _users WHERE username = ?', [username]);
+    if (!result.length || !result[0].values.length) return null;
+    return rowToUser(result[0].values[0]);
+  }
+
+  async function updateLocalUser(id, fields) {
+    await open();
+    const sets = [];
+    const vals = [];
+    if (fields.display_name !== undefined) { sets.push('display_name = ?'); vals.push(fields.display_name); }
+    if (sets.length === 0) return;
+    vals.push(id);
+    db.run(`UPDATE _users SET ${sets.join(', ')} WHERE id = ?`, vals);
+    scheduleSave();
+  }
+
   return {
     open, saveNow,
     // Shelves
@@ -440,5 +507,7 @@ const DB = (() => {
     getSpaces, createSpace, updateSpaceSyncTime, getShelvesBySpace, updateShelfServerId,
     // Sync (v2)
     enqueueSync, getSyncQueue, clearSyncEntry, countSyncQueue,
+    // Local Users (v3)
+    createLocalUser, getLocalUser, updateLocalUser,
   };
 })();

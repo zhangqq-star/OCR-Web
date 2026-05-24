@@ -907,7 +907,7 @@ async function doRegister(e) {
   }
 
   try {
-    await Auth.register(username, '', password);
+    await Auth.register(username, password);
     document.getElementById('modalRegister').classList.add('hidden');
     updateAuthUI();
     await Shelf.render();

@@ -1,5 +1,5 @@
 /**
- * 账号模块 — 登录态管理、注册/登录/登出
+ * 账号模块 — 本地认证（Web Crypto PBKDF2 + 本地 SQLite）
  */
 const Auth = (() => {
   let currentUser = null;
@@ -9,61 +9,110 @@ const Auth = (() => {
   function getUser() { return currentUser; }
   function isLoggedIn() { return !!token && !!currentUser; }
 
-  async function init() {
-    token = localStorage.getItem('auth_token');
-    if (!token) return false;
+  // ---- 密码哈希 (Web Crypto API) ----
 
-    try {
-      const body = await API.get('/api/auth/me');
-      currentUser = body.data.user;
-      localStorage.setItem('auth_user', JSON.stringify(currentUser));
-      return true;
-    } catch (err) {
-      // 401 token 过期 — API 已自动调用 logout()
-      if (err.message === '登录已过期') {
-        return false;
-      }
-      // 网络不可达，使用缓存的用户信息
-      const cached = localStorage.getItem('auth_user');
-      if (cached) {
-        currentUser = JSON.parse(cached);
-        return true;
-      }
-      return false;
-    }
+  async function hashPassword(password, existingSalt) {
+    const encoder = new TextEncoder();
+    const salt = existingSalt || crypto.getRandomValues(new Uint8Array(16));
+    const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      key,
+      256
+    );
+    const hash = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+    const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('');
+    return { hash, saltHex };
   }
 
-  async function login(username, password) {
-    const body = await API.post('/api/auth/login', { username, password });
-    token = body.data.token;
-    currentUser = body.data.user;
+  // ---- 会话管理 ----
+
+  function saveSession(user) {
+    token = crypto.randomUUID();
+    currentUser = user;
     localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(currentUser));
-    return body.data;
+    localStorage.setItem('auth_user', JSON.stringify(user));
   }
 
-  async function register(username, email, password) {
-    const body = await API.post('/api/auth/register', { username, email: email || '', password });
-    token = body.data.token;
-    currentUser = body.data.user;
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(currentUser));
-    return body.data;
-  }
-
-  function logout() {
+  function clearSession() {
     token = null;
     currentUser = null;
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
   }
 
+  // ---- 公开接口 ----
+
+  async function init() {
+    token = localStorage.getItem('auth_token');
+    const cached = localStorage.getItem('auth_user');
+    if (token && cached) {
+      currentUser = JSON.parse(cached);
+      return true;
+    }
+    return false;
+  }
+
+  async function login(username, password) {
+    const user = await DB.getLocalUser(username);
+    if (!user) {
+      throw new Error('用户名或密码错误');
+    }
+
+    const [saltHex] = user.password_hash.split(':');
+    const { hash } = await hashPassword(password, hexToBytes(saltHex));
+
+    if (saltHex + ':' + hash !== user.password_hash) {
+      throw new Error('用户名或密码错误');
+    }
+
+    const sessionUser = { id: user.id, username: user.username, display_name: user.display_name };
+    saveSession(sessionUser);
+    return sessionUser;
+  }
+
+  async function register(username, password) {
+    if (!username || !password) {
+      throw new Error('用户名和密码不能为空');
+    }
+    if (password.length < 6) {
+      throw new Error('密码至少 6 位');
+    }
+
+    const existing = await DB.getLocalUser(username);
+    if (existing) {
+      throw new Error('用户名已被注册');
+    }
+
+    const { hash, saltHex } = await hashPassword(password);
+    const passwordHash = saltHex + ':' + hash;
+
+    const userId = await DB.createLocalUser(username, passwordHash);
+    const user = { id: userId, username, display_name: username };
+    saveSession(user);
+    return user;
+  }
+
+  function logout() {
+    clearSession();
+  }
+
   async function updateProfile(fields) {
-    if (!token) throw new Error('未登录');
-    const body = await API.put('/api/auth/me', fields);
-    currentUser = body.data;
+    if (!currentUser) throw new Error('未登录');
+    await DB.updateLocalUser(currentUser.id, fields);
+    if (fields.display_name) currentUser.display_name = fields.display_name;
     localStorage.setItem('auth_user', JSON.stringify(currentUser));
     return currentUser;
+  }
+
+  // ---- 辅助 ----
+
+  function hexToBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+    return bytes;
   }
 
   return { init, isLoggedIn, getToken, getUser, login, register, logout, updateProfile };
