@@ -14,6 +14,10 @@ function showToast(msg) {
 // 当前识别结果暂存
 let pendingOcrResult = null;
 
+// 连续导入状态
+let batchState = null; // { shelfId, startRow, startCol, currentRow, currentCol, direction, overwritePolicy, occupied, count, skipCount, overwriteCount, startTime, totalCells }
+function isBatchMode() { return batchState !== null; }
+
 // ===== Tab 切换 =====
 function switchTab(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -24,8 +28,11 @@ function switchTab(viewId) {
   if (viewId === 'viewShelf') {
     Shelf.render();
   } else {
-    if (!Camera.isActive()) {
+    if (!Camera.isActive() && !isBatchMode()) {
       resetScanUI();
+    }
+    if (isBatchMode()) {
+      updateBatchStatus();
     }
   }
 }
@@ -50,6 +57,16 @@ function stopCamera() {
 }
 
 function resetScanUI() {
+  if (isBatchMode()) {
+    // 批量模式下只隐藏 OCR 结果，恢复视频预览
+    document.getElementById('ocrProgress').classList.add('hidden');
+    document.getElementById('ocrResult').classList.add('hidden');
+    pendingOcrResult = null;
+    const video = document.getElementById('video');
+    video.classList.remove('hidden');
+    video.play();
+    return;
+  }
   document.getElementById('btnStartCamera').classList.remove('hidden');
   document.getElementById('btnCapture').classList.add('hidden');
   document.getElementById('btnStopCamera').classList.add('hidden');
@@ -127,8 +144,21 @@ function showOcrResult(result) {
   pendingOcrResult = { raw: result.raw, codes, confidence: result.confidence };
   el.classList.remove('hidden');
 
-  if (codes.length > 0) {
-    setTimeout(() => openPositionPicker(), 400);
+  if (isBatchMode()) {
+    // 批量模式：显示批量操作按钮，不自动打开位置选择
+    document.getElementById('ocrActionsNormal').classList.add('hidden');
+    document.getElementById('ocrActionsBatch').classList.remove('hidden');
+    updateBatchStatus();
+  } else {
+    // 正常模式：显示标准按钮
+    document.getElementById('ocrActionsNormal').classList.remove('hidden');
+    document.getElementById('ocrActionsBatch').classList.add('hidden');
+    if (codes.length > 0) {
+      setTimeout(() => {
+        el.classList.add('hidden');
+        openPositionPicker();
+      }, 400);
+    }
   }
 }
 
@@ -137,6 +167,7 @@ function doOcrConfirm() {
     showToast('没有可保存的识别结果');
     return;
   }
+  document.getElementById('ocrResult').classList.add('hidden');
   openPositionPicker();
 }
 
@@ -234,6 +265,391 @@ function cancelPosition() {
   document.getElementById('modalPosition').classList.add('hidden');
 }
 
+// ===== 连续导入 =====
+
+async function openBatchStartModal() {
+  // 弹出货架选择
+  const shelves = await DB.getAllShelves();
+  const select = document.getElementById('batchShelfSelect');
+  select.innerHTML = shelves.map(s =>
+    `<option value="${s.id}" ${s.id === Shelf.getActiveShelfId() ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
+  ).join('');
+
+  // 重置分段控件
+  document.querySelector('#batchDirection .seg-btn.active').classList.remove('active');
+  document.querySelector('#batchDirection [data-dir="row-first"]').classList.add('active');
+  document.querySelector('#batchPolicy .seg-btn.active').classList.remove('active');
+  document.querySelector('#batchPolicy [data-policy="skip"]').classList.add('active');
+
+  batchState = null; // 还没正式开始，先清空
+  renderBatchPositionGrid();
+  document.getElementById('modalBatchStart').classList.remove('hidden');
+}
+
+function closeBatchStartModal() {
+  document.getElementById('modalBatchStart').classList.add('hidden');
+}
+
+function getBatchStartConfig() {
+  const shelfId = parseInt(document.getElementById('batchShelfSelect').value);
+  const direction = document.querySelector('#batchDirection .seg-btn.active').dataset.dir;
+  const overwritePolicy = document.querySelector('#batchPolicy .seg-btn.active').dataset.policy;
+  return { shelfId, direction, overwritePolicy };
+}
+
+async function renderBatchPositionGrid() {
+  const grid = document.getElementById('batchPositionGrid');
+  const { shelfId, direction, overwritePolicy } = getBatchStartConfig();
+  const parts = await DB.getByShelf(shelfId);
+  const occupied = new Set();
+  parts.forEach(p => {
+    if (p.shelfRow != null && p.shelfCol != null) {
+      occupied.add(`${p.shelfRow}_${p.shelfCol}`);
+    }
+  });
+
+  // 找第一个空格子作为默认起始位置
+  let defaultRow = 0, defaultCol = 0;
+  for (let r = 0; r < Shelf.getRows(); r++) {
+    for (let c = 0; c < Shelf.getCols(); c++) {
+      if (!occupied.has(`${r}_${c}`)) { defaultRow = r; defaultCol = c; break; }
+    }
+    if (!occupied.has(`${defaultRow}_${defaultCol}`)) break;
+  }
+
+  let selectedRow = defaultRow;
+  let selectedCol = defaultCol;
+  // 保留之前的选择（如果仍合法）
+  if (grid.dataset.selRow != null && grid.dataset.selCol != null) {
+    const prevKey = `${grid.dataset.selRow}_${grid.dataset.selCol}`;
+    if (!occupied.has(prevKey) || overwritePolicy !== 'skip') {
+      selectedRow = parseInt(grid.dataset.selRow);
+      selectedCol = parseInt(grid.dataset.selCol);
+    }
+  }
+
+  // 计算路径预览（从选中位置起始最多显示 8 个）
+  const pathCells = [];
+  let r = selectedRow, c = selectedCol;
+  for (let i = 0; i < 32 && pathCells.length < 8; i++) {
+    const key = `${r}_${c}`;
+    const isOcc = occupied.has(key);
+    if (!isOcc || overwritePolicy === 'overwrite') {
+      pathCells.push(key);
+    } else if (isOcc && overwritePolicy === 'stop') {
+      break;
+    }
+    // skip: 不计入预览
+    if (direction === 'row-first') { c++; if (c >= Shelf.getCols()) { c = 0; r++; } }
+    else { r++; if (r >= Shelf.getRows()) { r = 0; c++; } }
+    if (r >= Shelf.getRows() || c >= Shelf.getCols()) break;
+  }
+
+  grid.style.gridTemplateColumns = `repeat(${Shelf.getCols()}, 1fr)`;
+  grid.dataset.selRow = selectedRow;
+  grid.dataset.selCol = selectedCol;
+  grid.innerHTML = '';
+
+  for (let row = 0; row < Shelf.getRows(); row++) {
+    for (let col = 0; col < Shelf.getCols(); col++) {
+      const key = `${row}_${col}`;
+      const cell = document.createElement('div');
+      cell.className = 'position-cell';
+      cell.textContent = `${row + 1}-${col + 1}`;
+
+      if (occupied.has(key)) {
+        cell.classList.add('taken');
+      }
+
+      const pathIdx = pathCells.indexOf(key);
+      if (key === `${selectedRow}_${selectedCol}`) {
+        cell.classList.add('start-point');
+      } else if (pathIdx > 0) {
+        cell.classList.add('path-member');
+        cell.dataset.order = pathIdx + 1;
+      }
+
+      if (!occupied.has(key) || overwritePolicy !== 'skip') {
+        cell.addEventListener('click', () => {
+          grid.dataset.selRow = row;
+          grid.dataset.selCol = col;
+          renderBatchPositionGrid();
+        });
+      }
+
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function startBatchImport() {
+  const grid = document.getElementById('batchPositionGrid');
+  const selRow = parseInt(grid.dataset.selRow);
+  const selCol = parseInt(grid.dataset.selCol);
+  if (isNaN(selRow) || isNaN(selCol)) {
+    showToast('请选择起始位置');
+    return;
+  }
+
+  const { shelfId, direction, overwritePolicy } = getBatchStartConfig();
+  const totalCells = countRemainingPositions(selRow, selCol, direction, shelfId, overwritePolicy);
+
+  if (totalCells === 0) {
+    showToast('货架已无可用位置');
+    return;
+  }
+
+  // 加载当前占用情况
+  DB.getByShelf(shelfId).then(parts => {
+    const occupied = new Set();
+    parts.forEach(p => {
+      if (p.shelfRow != null && p.shelfCol != null) {
+        occupied.add(`${p.shelfRow}_${p.shelfCol}`);
+      }
+    });
+
+    batchState = {
+      shelfId,
+      startRow: selRow,
+      startCol: selCol,
+      currentRow: selRow,
+      currentCol: selCol,
+      direction,
+      overwritePolicy,
+      occupied,
+      count: 0,
+      skipCount: 0,
+      overwriteCount: 0,
+      startTime: Date.now(),
+      totalCells,
+    };
+
+    closeBatchStartModal();
+
+    // 显示批量状态栏
+    document.getElementById('batchStatus').classList.remove('hidden');
+    updateBatchStatus();
+
+    // 启动摄像头（如果没启动）
+    if (!Camera.isActive()) {
+      startCamera().then(() => {
+        // 确保批量按钮可见
+        document.getElementById('btnBatchImport').classList.add('hidden');
+      });
+    } else {
+      document.getElementById('btnBatchImport').classList.add('hidden');
+    }
+
+    showToast(`连续导入已开始，共 ${totalCells} 个可用位置`);
+  });
+}
+
+function countRemainingPositions(startRow, startCol, direction, shelfId, overwritePolicy) {
+  let count = 0;
+  let r = startRow, c = startCol;
+  const rows = Shelf.getRows(), cols = Shelf.getCols();
+
+  // 这个函数不 await DB，用同步方式粗略估计
+  for (let i = 0; i < rows * cols; i++) {
+    if (r >= rows || c >= cols) break;
+    count++;
+    if (direction === 'row-first') { c++; if (c >= cols) { c = 0; r++; } }
+    else { r++; if (r >= rows) { r = 0; c++; } }
+  }
+  return count;
+}
+
+function nextBatchPosition() {
+  if (!batchState) return null;
+  const bs = batchState;
+  let row = bs.currentRow;
+  let col = bs.currentCol;
+  const rows = Shelf.getRows(), cols = Shelf.getCols();
+
+  for (let i = 0; i < rows * cols; i++) {
+    // 前进一格
+    if (bs.direction === 'row-first') {
+      col++;
+      if (col >= cols) { col = 0; row++; }
+    } else {
+      row++;
+      if (row >= rows) { row = 0; col++; }
+    }
+
+    if (row >= rows || col >= cols) return null;
+
+    const key = `${row}_${col}`;
+    const isOccupied = bs.occupied.has(key);
+
+    if (!isOccupied) {
+      return { row, col };
+    }
+    if (isOccupied && bs.overwritePolicy === 'overwrite') {
+      return { row, col };
+    }
+    if (isOccupied && bs.overwritePolicy === 'stop') {
+      return null;
+    }
+    // skip policy: continue looping
+  }
+
+  return null;
+}
+
+function updateBatchStatus() {
+  if (!batchState) return;
+  const bs = batchState;
+  const text = document.getElementById('batchStatusText');
+  const fill = document.getElementById('batchProgressFill');
+
+  text.textContent = `当前：第 ${bs.currentRow + 1} 行 第 ${bs.currentCol + 1} 列 · 已存 ${bs.count} 个`;
+
+  const done = bs.count + bs.skipCount;
+  const pct = bs.totalCells > 0 ? Math.min(100, Math.round((done / bs.totalCells) * 100)) : 0;
+  fill.style.width = pct + '%';
+}
+
+async function batchConfirm() {
+  if (!batchState) return;
+  const bs = batchState;
+
+  const code = document.getElementById('positionCode')?.value?.trim() || '';
+  const codes = pendingOcrResult?.codes || [];
+  const finalCode = code || codes[0] || '';
+
+  // 检查是否是覆盖
+  const key = `${bs.currentRow}_${bs.currentCol}`;
+  const isOverwrite = bs.occupied.has(key);
+
+  await DB.add({
+    name: '',
+    code: finalCode,
+    specs: '',
+    quantity: 1,
+    note: pendingOcrResult?.raw || '',
+    shelfRow: bs.currentRow,
+    shelfCol: bs.currentCol,
+    shelfId: bs.shelfId,
+  });
+
+  if (isOverwrite) {
+    bs.overwriteCount++;
+  }
+  bs.occupied.add(key);
+  bs.count++;
+
+  // 前进到下一个位置
+  const next = nextBatchPosition();
+  if (!next) {
+    batchEnd();
+    return;
+  }
+
+  bs.currentRow = next.row;
+  bs.currentCol = next.col;
+  resetScanUI();
+  updateBatchStatus();
+  showToast(`已存入 · 下一位置：${next.row + 1} 行 ${next.col + 1} 列`);
+}
+
+function batchSkip() {
+  if (!batchState) return;
+  const bs = batchState;
+  bs.skipCount++;
+
+  const next = nextBatchPosition();
+  if (!next) {
+    batchEnd();
+    return;
+  }
+
+  bs.currentRow = next.row;
+  bs.currentCol = next.col;
+  resetScanUI();
+  updateBatchStatus();
+  showToast(`已跳过 · 下一位置：${next.row + 1} 行 ${next.col + 1} 列`);
+}
+
+function batchRetry() {
+  // 隐藏结果，恢复视频，重新拍照
+  document.getElementById('ocrResult').classList.add('hidden');
+  pendingOcrResult = null;
+  const video = document.getElementById('video');
+  video.classList.remove('hidden');
+  video.play();
+}
+
+async function batchManual() {
+  if (!batchState) return;
+  const bs = batchState;
+  const code = prompt('请输入 10 位零件编号：');
+  if (!code || !code.trim()) return;
+
+  const key = `${bs.currentRow}_${bs.currentCol}`;
+  const isOverwrite = bs.occupied.has(key);
+
+  await DB.add({
+    name: '',
+    code: code.trim(),
+    specs: '',
+    quantity: 1,
+    note: '',
+    shelfRow: bs.currentRow,
+    shelfCol: bs.currentCol,
+    shelfId: bs.shelfId,
+  });
+
+  if (isOverwrite) {
+    bs.overwriteCount++;
+  }
+  bs.occupied.add(key);
+  bs.count++;
+
+  const next = nextBatchPosition();
+  if (!next) {
+    batchEnd();
+    return;
+  }
+
+  bs.currentRow = next.row;
+  bs.currentCol = next.col;
+  updateBatchStatus();
+  showToast(`已手动录入 · 下一位置：${next.row + 1} 行 ${next.col + 1} 列`);
+}
+
+function batchEnd() {
+  if (!batchState) return;
+  const elapsed = Date.now() - batchState.startTime;
+  const bs = batchState;
+
+  // 清理 UI
+  document.getElementById('batchStatus').classList.add('hidden');
+  document.getElementById('btnBatchImport').classList.remove('hidden');
+  document.getElementById('ocrResult').classList.add('hidden');
+  pendingOcrResult = null;
+
+  const video = document.getElementById('video');
+  video.classList.remove('hidden');
+  video.play();
+
+  // 显示汇总
+  document.getElementById('batchSummarySuccess').textContent = `${bs.count} 个`;
+  document.getElementById('batchSummarySkipped').textContent = `${bs.skipCount} 个`;
+  document.getElementById('batchSummaryOverwritten').textContent = `${bs.overwriteCount} 个`;
+  const secs = Math.round(elapsed / 1000);
+  document.getElementById('batchSummaryTime').textContent = secs < 60 ? `${secs} 秒` : `${Math.floor(secs / 60)} 分 ${secs % 60} 秒`;
+  document.getElementById('modalBatchSummary').classList.remove('hidden');
+
+  // 重新加载占用情况，刷新货架
+  Shelf.render();
+
+  batchState = null;
+}
+
+function closeBatchSummary() {
+  document.getElementById('modalBatchSummary').classList.add('hidden');
+}
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -270,6 +686,55 @@ function bindEvents() {
   confirmBtn.style.width = '100%';
   confirmBtn.addEventListener('click', confirmPosition);
   posModal.querySelector('.modal-card').appendChild(confirmBtn);
+
+  // 连续导入 — 打开起始位置弹窗
+  document.getElementById('btnBatchImport').addEventListener('click', openBatchStartModal);
+
+  // 连续导入 — 起始位置弹窗
+  document.getElementById('btnBatchCancel').addEventListener('click', closeBatchStartModal);
+  document.getElementById('modalBatchStart').querySelector('.modal-backdrop')
+    .addEventListener('click', closeBatchStartModal);
+  document.getElementById('btnBatchStart').addEventListener('click', startBatchImport);
+
+  // 连续导入 — 方向/策略切换时重新渲染预览
+  document.querySelectorAll('#batchDirection .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#batchDirection .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderBatchPositionGrid();
+    });
+  });
+  document.querySelectorAll('#batchPolicy .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#batchPolicy .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      renderBatchPositionGrid();
+    });
+  });
+
+  // 连续导入 — 货架切换时重新渲染预览
+  document.getElementById('batchShelfSelect').addEventListener('change', renderBatchPositionGrid);
+
+  // 连续导入 — 批量操作按钮
+  document.getElementById('btnBatchConfirm').addEventListener('click', batchConfirm);
+  document.getElementById('btnBatchSkip').addEventListener('click', batchSkip);
+  document.getElementById('btnBatchRetry').addEventListener('click', batchRetry);
+  document.getElementById('btnBatchManual').addEventListener('click', batchManual);
+  document.getElementById('btnBatchEnd').addEventListener('click', batchEnd);
+  document.getElementById('btnBatchExitTop').addEventListener('click', batchEnd);
+
+  // 连续导入 — 汇总弹窗
+  document.getElementById('btnBatchSummaryContinue').addEventListener('click', () => {
+    closeBatchSummary();
+    openBatchStartModal();
+  });
+  document.getElementById('btnBatchSummaryView').addEventListener('click', () => {
+    closeBatchSummary();
+    stopCamera();
+    switchTab('viewShelf');
+  });
+  document.getElementById('modalBatchSummary').querySelector('.modal-backdrop')
+    .addEventListener('click', closeBatchSummary);
 
   // 详情弹窗
   document.getElementById('formDetail').addEventListener('submit', Shelf.saveDetail);

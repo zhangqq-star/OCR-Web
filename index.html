@@ -34,6 +34,11 @@
     <!-- 扫描视图 -->
     <section id="viewScan" class="view active">
       <div class="scan-container">
+        <div id="batchStatus" class="batch-status hidden">
+          <span id="batchStatusText" class="batch-status-text"></span>
+          <div class="batch-progress-track"><div id="batchProgressFill" class="batch-progress-fill"></div></div>
+          <button id="btnBatchExitTop" class="batch-exit-btn">结束</button>
+        </div>
         <video id="video" autoplay playsinline></video>
         <canvas id="canvas" class="hidden"></canvas>
         <div id="scanPlaceholder" class="scan-placeholder glass-card">
@@ -44,19 +49,12 @@
           <div class="spinner"></div>
           <p id="ocrProgressText">识别中...</p>
         </div>
-        <div id="ocrResult" class="ocr-result glass-card hidden">
-          <div class="ocr-result-header">识别结果</div>
-          <div id="ocrResultContent" class="ocr-result-content"></div>
-          <div class="ocr-result-actions">
-            <button id="btnOcrConfirm" class="btn-primary">确认并存入货架</button>
-            <button id="btnOcrRetry" class="btn-secondary">重新识别</button>
-          </div>
-        </div>
       </div>
       <div class="scan-actions">
         <button id="btnCapture" class="btn-capture hidden">📸 拍照识别</button>
         <button id="btnStartCamera" class="btn-capture">📷 打开摄像头</button>
         <button id="btnStopCamera" class="btn-secondary hidden">关闭摄像头</button>
+        <button id="btnBatchImport" class="btn-capture" style="background:#34C759;">📦 连续导入</button>
       </div>
     </section>
 
@@ -98,6 +96,63 @@
     </div>
   </div>
 
+  <!-- 连续导入起始位置选择弹窗 -->
+  <div id="modalBatchStart" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>📦 连续导入 — 选择起始位置</h3>
+      <label>目标货架</label>
+      <select id="batchShelfSelect" class="batch-shelf-select"></select>
+      <label>填充方向</label>
+      <div class="segmented-control" id="batchDirection">
+        <button class="seg-btn active" data-dir="row-first">先行后列 →</button>
+        <button class="seg-btn" data-dir="col-first">先列后行 ↓</button>
+      </div>
+      <label>覆盖策略</label>
+      <div class="segmented-control" id="batchPolicy">
+        <button class="seg-btn active" data-policy="skip">跳过已占用</button>
+        <button class="seg-btn" data-policy="overwrite">覆盖</button>
+        <button class="seg-btn" data-policy="stop">遇占用停止</button>
+      </div>
+      <label>点击网格选择起始位置</label>
+      <div class="position-grid" id="batchPositionGrid"></div>
+      <div class="modal-actions">
+        <button id="btnBatchCancel" class="btn-secondary">取消</button>
+        <button id="btnBatchStart" class="btn-primary">开始导入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 连续导入完成汇总弹窗 -->
+  <div id="modalBatchSummary" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>📦 连续导入完成</h3>
+      <div class="batch-summary">
+        <div class="batch-summary-row">
+          <span>导入成功</span>
+          <span id="batchSummarySuccess" class="batch-summary-num">0</span>
+        </div>
+        <div class="batch-summary-row">
+          <span>跳过</span>
+          <span id="batchSummarySkipped" class="batch-summary-num">0</span>
+        </div>
+        <div class="batch-summary-row">
+          <span>覆盖</span>
+          <span id="batchSummaryOverwritten" class="batch-summary-num">0</span>
+        </div>
+        <div class="batch-summary-row">
+          <span>耗时</span>
+          <span id="batchSummaryTime" class="batch-summary-num">--</span>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button id="btnBatchSummaryContinue" class="btn-secondary">继续导入</button>
+        <button id="btnBatchSummaryView" class="btn-primary">查看货架</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 零件详情弹窗 -->
   <div id="modalDetail" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -122,6 +177,26 @@
           <button type="submit" class="btn-primary">保存</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- OCR 识别结果弹窗（全局，所有页面上方） -->
+  <div id="ocrResult" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <div class="ocr-result-header">识别结果</div>
+      <div id="ocrResultContent" class="ocr-result-content"></div>
+      <div class="ocr-result-actions" id="ocrActionsNormal">
+        <button id="btnOcrConfirm" class="btn-primary">确认并存入货架</button>
+        <button id="btnOcrRetry" class="btn-secondary">重新识别</button>
+      </div>
+      <div class="ocr-result-actions hidden" id="ocrActionsBatch">
+        <button id="btnBatchConfirm" class="btn-primary">确认存入</button>
+        <button id="btnBatchSkip" class="btn-secondary">跳过</button>
+        <button id="btnBatchRetry" class="btn-secondary">重试</button>
+        <button id="btnBatchManual" class="btn-secondary">手动输入</button>
+        <button id="btnBatchEnd" class="btn-secondary">结束</button>
+      </div>
     </div>
   </div>
 
