@@ -19,12 +19,15 @@ const Exporter = (() => {
       return;
     }
 
+    const shelfName = typeof Shelf !== 'undefined' && Shelf.getActiveShelfName
+      ? Shelf.getActiveShelfName() : '';
     const data = parts.map((p, i) => ({
       '序号': i + 1,
       '编号': p.code || '',
       '名称': p.name || '',
       '规格': p.specs || '',
       '数量': p.quantity || 0,
+      '货架': shelfName,
       '货架行': (p.shelfRow ?? 0) + 1,
       '货架列': (p.shelfCol ?? 0) + 1,
       '备注': p.note || '',
@@ -38,6 +41,7 @@ const Exporter = (() => {
       { wch: 18 },
       { wch: 16 },
       { wch: 8 },
+      { wch: 12 },
       { wch: 8 },
       { wch: 8 },
       { wch: 24 },

@@ -17,8 +17,16 @@ const Shelf = (() => {
   let longPressStartX = 0, longPressStartY = 0;
   let ignoreClickUntil = 0;
 
+  // 批量管理模式
+  let batchDeleteMode = false;
+  let selectedParts = new Set();
+
   function getCols() { return COLS; }
   function getActiveShelfId() { return activeShelfId; }
+  function getActiveShelfName() {
+    const s = shelves.find(s => s.id === activeShelfId);
+    return s ? s.name : '';
+  }
 
   // ---- 初始化 ----
 
@@ -79,6 +87,7 @@ const Shelf = (() => {
 
   async function switchTo(id, direction) {
     if (id === activeShelfId) return;
+    exitBatchMode();
     cancelMoveMode();
     const grid = document.getElementById('shelfGrid');
     if (direction) {
@@ -149,14 +158,21 @@ const Shelf = (() => {
         if (part) {
           cell.innerHTML =
             `<span class="cell-position">${row+1}-${col+1}</span>` +
+            (batchDeleteMode ? `<span class="batch-checkbox${selectedParts.has(part.id) ? ' checked' : ''}"></span>` : '') +
             (part.code ? `<span class="cell-code" title="${escapeHtml(part.code)}">${escapeHtml(part.code)}</span>` : '') +
             (part.name ? `<span class="cell-name">${escapeHtml(part.name)}</span>` : '') +
             (part.quantity > 1 ? `<span class="cell-quantity">×${part.quantity}</span>` : '') +
             (partsAtPos.length > 1 ? `<span class="cell-quantity cell-dup-warn">×${partsAtPos.length}</span>` : '');
 
+          if (selectedParts.has(part.id)) {
+            cell.classList.add('batch-selected');
+          }
+
           cell.addEventListener('click', () => {
             if (Date.now() < ignoreClickUntil) return;
-            if (movePart) {
+            if (batchDeleteMode) {
+              toggleSelect(part);
+            } else if (movePart) {
               handleMoveClick(row, col, part);
             } else {
               openDetail(part);
@@ -164,7 +180,7 @@ const Shelf = (() => {
           });
 
           cell.addEventListener('pointerdown', (e) => {
-            if (movePart) return;
+            if (batchDeleteMode || movePart) return;
             longPressStartX = e.clientX;
             longPressStartY = e.clientY;
             longPressTimer = setTimeout(() => enterMoveMode(part, row, col), 500);
@@ -287,6 +303,80 @@ const Shelf = (() => {
     b.shelfRow = rowA; b.shelfCol = colA;
     DB.update(a.id, a);
     DB.update(b.id, b);
+  }
+
+  // ---- 批量管理模式 ----
+
+  function enterBatchMode() {
+    cancelMoveMode();
+    batchDeleteMode = true;
+    selectedParts.clear();
+    document.getElementById('btnBatchManage').classList.add('active');
+    document.getElementById('batchActionBar').classList.remove('hidden');
+    render();
+    updateActionBar();
+  }
+
+  function exitBatchMode() {
+    if (!batchDeleteMode) return;
+    batchDeleteMode = false;
+    selectedParts.clear();
+    document.getElementById('btnBatchManage').classList.remove('active');
+    document.getElementById('batchActionBar').classList.add('hidden');
+    render();
+  }
+
+  function toggleSelect(part) {
+    if (selectedParts.has(part.id)) {
+      selectedParts.delete(part.id);
+    } else {
+      selectedParts.add(part.id);
+    }
+    render();
+    updateActionBar();
+  }
+
+  function selectAll() {
+    DataStore.getByShelf(activeShelfId).then(parts => {
+      const occupiedIds = parts
+        .filter(p => p.shelfRow != null && p.shelfCol != null)
+        .map(p => p.id);
+      const allSelected = occupiedIds.every(id => selectedParts.has(id));
+
+      if (allSelected) {
+        occupiedIds.forEach(id => selectedParts.delete(id));
+      } else {
+        occupiedIds.forEach(id => selectedParts.add(id));
+      }
+      render();
+      updateActionBar();
+    });
+  }
+
+  function deselectAll() {
+    selectedParts.clear();
+    render();
+    updateActionBar();
+  }
+
+  function updateActionBar() {
+    const count = selectedParts.size;
+    const btn = document.getElementById('btnBatchDeleteSelected');
+    btn.textContent = count > 0 ? `删除选中 (${count})` : '删除选中';
+    btn.disabled = count === 0;
+  }
+
+  async function deleteSelected() {
+    if (selectedParts.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedParts.size} 个零件吗？`)) return;
+
+    const ids = Array.from(selectedParts);
+    for (const id of ids) {
+      await DataStore.removePart(id);
+    }
+    selectedParts.clear();
+    render();
+    showToast(`已删除 ${ids.length} 个零件`);
   }
 
   // ---- 零件详情 ----
@@ -418,6 +508,7 @@ const Shelf = (() => {
     getCols,
     getRows: () => ROWS,
     getActiveShelfId,
+    getActiveShelfName,
     createShelf,
     renameCurrent,
     deleteCurrent,
@@ -429,5 +520,10 @@ const Shelf = (() => {
     saveDetail,
     deleteDetail,
     setupSwipe,
+    enterBatchMode,
+    exitBatchMode,
+    selectAll,
+    deselectAll,
+    deleteSelected,
   };
 })();
