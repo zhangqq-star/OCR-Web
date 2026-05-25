@@ -1,6 +1,6 @@
 # 货架管理 — OCR 零件管理系统 v2.0
 
-本地化 OCR 货架管理系统，支持纯前端 PWA 本地模式与后端云端模式。通过摄像头拍照 + Tesseract.js OCR 识别 10 位零件编号，存入货架网格进行可视化管理。v2.0 新增用户账号、团队空间、在线协同与权限管理。
+本地化 OCR 货架管理系统，支持纯前端 PWA 本地模式与后端云端模式。通过摄像头拍照 + Tesseract.js OCR 识别 10 位零件编号，存入货架网格进行可视化管理。v2.0 新增用户账号系统，支持本地/在线两种认证方式。
 
 ## 快速开始
 
@@ -11,18 +11,18 @@ python -m http.server 8080
 # 浏览器打开 http://localhost:8080
 ```
 
-### 云端模式（后端 + 账号 + 团队空间）
+### 云端模式（后端 + 账号系统）
 
 ```bash
 cd server && npm install && npm start
 # 浏览器打开 http://localhost:3000
-# 注册账号后可创建/加入团队空间，实现多人协同
+# 注册账号后数据云端存储，支持离线降级
 ```
 
 ## 项目结构
 
 ```
-├── index.html          # 入口，所有 UI 结构（含登录/注册/空间/团队弹窗）
+├── index.html          # 入口，所有 UI 结构（含登录/注册弹窗）
 ├── manifest.json       # PWA 配置
 ├── sw.js               # Service Worker 缓存策略（v3，排除 API 路径）
 ├── CLAUDE.md           # AI 开发协作规范（稳定指引）
@@ -34,16 +34,15 @@ cd server && npm install && npm start
 │       ├── index.js    # Express 入口 + 路由挂载
 │       ├── config.js   # 环境变量配置
 │       ├── db.js       # SQLite 封装（sql.js）
-│       ├── middleware/  # JWT 验证 + 团队权限
-│       └── routes/     # auth / teams / shelves / parts / logs
+│       ├── middleware/  # JWT 验证
+│       └── routes/     # auth
 ├── src/
 │   ├── css/style.css   # 全部样式（iOS 风格、毛玻璃深色主题）
 │   ├── js/
 │   │   ├── app.js      # 主控制器 + DataStore 抽象层 + 账号事件
-│   │   ├── auth.js     # 账号模块：登录态管理（v2.0 新增）
+│   │   ├── auth.js     # 账号模块（v2.0 新增）：注册/登录/会话管理
 │   │   ├── api.js      # HTTP 封装 + 离线队列（v2.0 新增）
-│   │   ├── team.js     # 团队模块：空间切换 + 成员管理（v2.0 新增）
-│   │   ├── db.js       # 本地 SQLite 封装（SQL.js + OPFS，v2 支持空间/同步）
+│   │   ├── db.js       # 本地 SQLite 封装（SQL.js + OPFS，v2 支持账号隔离/离线同步）
 │   │   ├── ocr.js      # Tesseract 识别：图像预处理 + 多模式识别
 │   │   ├── camera.js   # 摄像头：MediaDevices 封装
 │   │   ├── shelf.js    # 货架模块：网格渲染、多货架切换、长按移动
@@ -61,7 +60,7 @@ cd server && npm install && npm start
 | OCR | Tesseract.js v5（CDN） |
 | 本地存储 | SQLite（SQL.js WASM + OPFS 持久化） |
 | 后端 | Node.js + Express + SQLite（sql.js） |
-| 认证 | JWT（jsonwebtoken + bcryptjs） |
+| 认证 | 本地 Web Crypto PBKDF2 / 后端 JWT（jsonwebtoken + bcryptjs） |
 | 导出 | SheetJS xlsx v0.18（CDN） |
 | 离线 | Service Worker + Web App Manifest |
 | UI | 原生 HTML/CSS/JS，iOS 风格毛玻璃深色主题 |
@@ -87,16 +86,11 @@ cd server && npm install && npm start
 - 网格路径预览，直观展示填充顺序
 - OCR 确认后自动推进至下一格，批量扫描入库
 
-### 账号与团队空间（v2.0 新增）
+### 账号系统（v2.0 新增）
 - **三模式运行**：本地模式（无登录）/ 在线模式 / 离线降级（本地缓存 + 同步队列）
-- **用户注册/登录**：JWT 认证，7 天有效期
-- **个人空间**：注册时自动创建，仅自己可见
-- **团队空间**：创建团队（自动生成 8 位邀请码）、通过邀请码加入
-- **权限管理**：owner / admin / member 三级角色
-- **在线协同**：团队成员共享货架数据，实时同步
+- **用户注册/登录**：本地模式使用 Web Crypto PBKDF2 认证，云端模式使用 JWT（7 天有效期）
+- **个人空间**：注册时自动创建，数据按用户隔离
 - **离线队列**：断网时操作暂存本地，恢复网络自动推送
-- **数据迁移**：首次登录提示将本地数据上传至云端
-- **操作日志**：所有变更记录在后端（按团队查询）
 
 ### Excel 导出
 - 一键导出当前货架数据为 `.xlsx`
@@ -116,6 +110,6 @@ cd server && npm install && npm start
 | v1.3 | 批量扫描 | 连续导入（起始位置/填充方向/覆盖策略/自动推进）、多编号选择、SQLite 持久化、导出按行列排序 |
 | v1.4 | 识别增强 | 条码识别、模板匹配、搜索筛选、撤销 |
 | v1.5 | 协作同步 | 局域网同步、Excel 导入、数据备份、标签打印 |
-| v2.0 | 云端化 ← 当前 | 后端 + 账号 + 团队空间 + 权限 + 操作日志 |
+| v2.0 | 云端化 ← 当前 | 后端 + 账号 + 数据隔离 |
 | v2.5 | 智能化 | 库存预警、存取分析、语音录入、AI 辅助识别 |
 | v3.0 | 硬件集成 | 蓝牙扫码枪、RFID、电子货架标签、IoT 传感器 |

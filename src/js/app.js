@@ -37,6 +37,10 @@ function switchTab(viewId) {
   document.getElementById(viewId).classList.add('active');
   document.querySelector(`[data-view="${viewId}"]`).classList.add('active');
 
+  if (viewId !== 'viewShelf') {
+    Shelf.exitBatchMode();
+  }
+
   if (viewId === 'viewShelf') {
     Shelf.render();
   } else {
@@ -795,11 +799,92 @@ function bindEvents() {
   document.getElementById('shelfName').addEventListener('click', Shelf.renameCurrent);
   document.getElementById('shelfName').addEventListener('dblclick', Shelf.renameCurrent);
 
+  // 批量管理
+  document.getElementById('btnBatchManage').addEventListener('click', () => {
+    if (document.getElementById('btnBatchManage').classList.contains('active')) {
+      Shelf.exitBatchMode();
+    } else {
+      Shelf.enterBatchMode();
+    }
+  });
+  document.getElementById('btnBatchSelectAll').addEventListener('click', Shelf.selectAll);
+  document.getElementById('btnBatchDeleteSelected').addEventListener('click', Shelf.deleteSelected);
+  document.getElementById('btnBatchExit').addEventListener('click', Shelf.exitBatchMode);
+
   // 货架滑动切换
   Shelf.setupSwipe();
 
   // 导出
   document.getElementById('btnExport').addEventListener('click', Exporter.exportToExcel);
+
+  // 导入 Excel
+  document.getElementById('btnImport').addEventListener('click', Importer.triggerFilePicker);
+  document.getElementById('btnImportCancel').addEventListener('click', Importer.closeModal);
+  document.getElementById('modalImport').querySelector('.modal-backdrop')
+    .addEventListener('click', Importer.closeModal);
+  document.getElementById('btnImportStart').addEventListener('click', Importer.executeImport);
+
+  // 导入 Sheet 切换
+  document.getElementById('importSheetSelect').addEventListener('change', function () {
+    Importer.switchSheet(this.value);
+  });
+
+  // 导入配置变化 → 重新渲染预览
+  document.querySelectorAll('#importTarget .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#importTarget .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (btn.dataset.target === 'new') {
+        document.getElementById('importShelfRow').classList.add('hidden');
+        document.getElementById('importNewShelfRow').classList.remove('hidden');
+      } else {
+        document.getElementById('importShelfRow').classList.remove('hidden');
+        document.getElementById('importNewShelfRow').classList.add('hidden');
+      }
+      Importer.renderImportPreview();
+    });
+  });
+
+  // 导入分组目标切换
+  document.querySelectorAll('#importGroupTarget .seg-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      document.querySelectorAll('#importGroupTarget .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const isByShelf = btn.dataset.target === 'by-shelf';
+      document.getElementById('importGroupInfoRow').classList.toggle('hidden', !isByShelf);
+      document.getElementById('importShelfRow').classList.toggle('hidden', isByShelf);
+      document.getElementById('importNewShelfRow').classList.add('hidden');
+      document.getElementById('importTargetRow').classList.toggle('hidden', isByShelf);
+      if (!isByShelf) await Importer.resetTargetUI(true);
+      Importer.renderImportPreview();
+    });
+  });
+
+  // 导入分组货架预览切换
+  document.getElementById('importGroupShelfSelect').addEventListener('change', function () {
+    Importer.switchGroupShelf(this.value);
+  });
+
+  document.querySelectorAll('#importDirection .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#importDirection .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      Importer.renderImportPreview();
+    });
+  });
+  document.querySelectorAll('#importPolicy .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#importPolicy .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      Importer.renderImportPreview();
+    });
+  });
+  document.getElementById('importShelfSelect').addEventListener('change', Importer.renderImportPreview);
+
+  // 导入汇总
+  document.getElementById('btnImportSummaryClose').addEventListener('click', Importer.closeSummary);
+  document.getElementById('modalImportSummary').querySelector('.modal-backdrop')
+    .addEventListener('click', Importer.closeSummary);
 
   // 窗口大小改变时重新渲染货架
   let resizeTimer;

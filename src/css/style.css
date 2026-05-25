@@ -24,6 +24,10 @@
   box-sizing: border-box;
 }
 
+html {
+  font-size: clamp(16px, 0.5vw + 14px, 20px);
+}
+
 html, body {
   height: 100%;
   overflow: hidden;
@@ -371,6 +375,31 @@ input, textarea, button {
   background: var(--accent-light);
 }
 
+.btn-nav-manage {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-light);
+  background: transparent;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  margin-left: 4px;
+}
+
+.btn-nav-manage:active {
+  background: var(--bg-primary);
+}
+
+.btn-nav-manage.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 /* ===== 货架网格 ===== */
 .shelf-swipe-area {
   overflow-x: auto;
@@ -441,16 +470,15 @@ input, textarea, button {
 }
 
 .shelf-cell .cell-code {
-  font-size: 0.64rem;
+  font-size: 0.59rem;
   font-weight: 600;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
-  font-family: "SF Mono", "SF Mono", "Menlo", monospace;
+  font-family: "SF Mono", "Menlo", monospace;
   line-height: 1.15;
   max-width: 100%;
-  word-break: break-all;
-  overflow-wrap: break-word;
+  white-space: nowrap;
 }
 
 .shelf-cell .cell-name {
@@ -458,10 +486,8 @@ input, textarea, button {
   font-weight: 500;
   line-height: 1.15;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  word-break: break-all;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--text-secondary);
   max-width: 100%;
 }
@@ -484,7 +510,101 @@ input, textarea, button {
   opacity: 0.5;
 }
 
-/* ---- 长按移动模式 ---- */
+/* ---- 批量管理模式 ---- */
+.shelf-cell .batch-checkbox {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--separator);
+  background: var(--bg-card);
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.shelf-cell .batch-checkbox.checked {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.shelf-cell .batch-checkbox.checked::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.shelf-cell.batch-selected {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 2px rgba(255, 59, 48, 0.2);
+}
+
+/* 底部批量操作栏 */
+.batch-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 0.5px solid var(--separator);
+  box-shadow: 0 -2px 12px rgba(0,0,0,0.1);
+}
+
+.batch-action-bar.hidden {
+  display: none;
+}
+
+.btn-batch-action {
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btn-batch-action:active {
+  opacity: 0.7;
+}
+
+.btn-batch-delete {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--danger);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.btn-batch-delete:active {
+  opacity: 0.7;
+}
+
+.btn-batch-delete:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .shelf-cell.moving {
   border-color: var(--accent) !important;
   box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25);
@@ -514,7 +634,7 @@ input, textarea, button {
     min-height: 74px;
     padding: 10px 5px 8px;
   }
-  .shelf-cell .cell-code { font-size: 0.78rem; }
+  .shelf-cell .cell-code { font-size: 0.72rem; }
   .shelf-cell .cell-name { font-size: 0.68rem; }
   .shelf-cell .cell-position { font-size: 0.58rem; top: 2px; right: 4px; }
   .shelf-cell .cell-quantity { font-size: 0.65rem; }
@@ -1146,4 +1266,113 @@ input, textarea, button {
   border: 1px solid var(--border-light);
   background: var(--bg-card);
   cursor: pointer;
+}
+
+/* ===== Excel 导入 ===== */
+.import-summary {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+}
+
+.import-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  min-width: 320px;
+}
+
+.import-preview-cell {
+  min-height: 52px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 2px 3px;
+  position: relative;
+  gap: 0;
+}
+
+.import-preview-cell .import-preview-pos {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 0.45rem;
+  color: var(--text-secondary);
+  opacity: 0.45;
+  line-height: 1;
+}
+
+.import-preview-cell .import-preview-code {
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px;
+  font-variant-numeric: tabular-nums;
+  font-family: "SF Mono", "Menlo", monospace;
+}
+
+.import-preview-cell.preview-empty {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  opacity: 0.5;
+}
+
+.import-preview-cell.preview-existing {
+  background: #F5F5F5;
+  border-color: var(--border-light);
+}
+
+.import-preview-cell.preview-existing .import-preview-code {
+  color: var(--text-secondary);
+}
+
+.import-preview-cell.preview-new {
+  background: var(--accent-light);
+  border-color: rgba(0, 122, 255, 0.3);
+}
+
+.import-preview-cell.preview-new .import-preview-code {
+  color: var(--accent);
+}
+
+.import-preview-cell.preview-overwrite {
+  background: #FFF3CD;
+  border-color: #FF9500;
+}
+
+.import-preview-cell.preview-overwrite .import-preview-code {
+  color: #B85E00;
+}
+
+.import-preview-cell.preview-start {
+  box-shadow: 0 0 0 2px var(--accent);
+  z-index: 1;
+}
+
+.import-preview-cell.preview-path {
+  background: rgba(0, 122, 255, 0.08);
+  border-color: rgba(0, 122, 255, 0.25);
+}
+
+.import-spill-warning {
+  font-size: 0.78rem;
+  color: #FF9500;
+  text-align: center;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #FFF3CD;
+  border-radius: var(--radius-sm);
 }
