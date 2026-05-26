@@ -6,7 +6,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "gen-cert": "node src/gen-cert.js",
+    "dev:https": "HTTPS=true node --watch src/index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

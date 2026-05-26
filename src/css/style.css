@@ -26,28 +26,35 @@
 
 html {
   font-size: clamp(16px, 0.5vw + 14px, 20px);
-}
-
-html, body {
-  height: 100%;
+  position: fixed;
+  inset: 0;
   overflow: hidden;
+  touch-action: manipulation;
 }
 
 body {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  touch-action: manipulation;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
   -webkit-font-smoothing: antialiased;
 }
 
-input, textarea, button {
+input, textarea, button, select {
   font: inherit;
   color: inherit;
   outline: none;
+  touch-action: manipulation;
+}
+
+.shelf-cell, .position-cell, .tab, .seg-btn, .import-preview-cell {
+  touch-action: manipulation;
 }
 
 /* ===== 顶部标题栏 ===== */
@@ -308,10 +315,17 @@ input, textarea, button {
 /* ===== 货架导航 ===== */
 .shelf-nav {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 14px 0;
+}
+
+.shelf-nav-row {
+  display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 0 0 14px 0;
 }
 
 .shelf-name {
@@ -375,6 +389,25 @@ input, textarea, button {
   background: var(--accent-light);
 }
 
+.btn-nav-delete {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-light);
+  background: transparent;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  margin-left: 4px;
+}
+
+.btn-nav-delete:active {
+  background: #fce4e4;
+}
+
 .btn-nav-manage {
   width: 34px;
   height: 34px;
@@ -405,7 +438,16 @@ input, textarea, button {
   overflow-x: auto;
   overflow-y: visible;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y;
+  touch-action: manipulation;
+}
+
+.shelf-swipe-area::-webkit-scrollbar {
+  height: 4px;
+}
+
+.shelf-swipe-area::-webkit-scrollbar-thumb {
+  background: var(--separator);
+  border-radius: 2px;
 }
 
 .shelf-grid {
@@ -446,6 +488,7 @@ input, textarea, button {
   gap: 1px;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .shelf-cell:active {
@@ -1266,6 +1309,81 @@ input, textarea, button {
   border: 1px solid var(--border-light);
   background: var(--bg-card);
   cursor: pointer;
+}
+
+/* ===== 货架行数控制 ===== */
+.shelf-row-count {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-left: -2px;
+  margin-right: 2px;
+}
+
+.btn-nav-row {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+  padding-bottom: 2px;
+}
+
+.btn-nav-row:active {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.btn-nav-row:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* ===== 导入弹窗行数控制 ===== */
+.row-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.btn-row-control {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-light);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  padding-bottom: 2px;
+}
+
+.btn-row-control:active {
+  background: var(--border-light);
+}
+
+.btn-row-control:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.row-count-display {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 40px;
+  text-align: center;
 }
 
 /* ===== Excel 导入 ===== */

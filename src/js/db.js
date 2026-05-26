@@ -5,7 +5,7 @@
  */
 const DB = (() => {
   const DB_FILE = 'ocrshelf.db';
-  const SCHEMA_VERSION = 4;
+  const SCHEMA_VERSION = 5;
   let db = null;
   let initPromise = null;
 
@@ -91,6 +91,7 @@ const DB = (() => {
         space_id TEXT DEFAULT 'personal',
         server_id INTEGER,
         owner_id TEXT DEFAULT 'anon',
+        row_count INTEGER DEFAULT 4,
         createdAt INTEGER NOT NULL
       )
     `);
@@ -219,10 +220,25 @@ const DB = (() => {
       if (!cols.includes('owner_id')) {
         db.run("ALTER TABLE shelves ADD COLUMN owner_id TEXT DEFAULT 'anon'");
       }
-      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", ['4']);
       console.log('[DB] v3 → v4 迁移完成');
     } catch (e) {
       console.warn('[DB] 迁移失败（可能已是 v4）:', e.message);
+    }
+  }
+
+  // v4 → v5 迁移
+  function migrateV4toV5() {
+    try {
+      const info = db.exec("PRAGMA table_info('shelves')");
+      const cols = info.length > 0 ? info[0].values.map(r => r[1]) : [];
+      if (!cols.includes('row_count')) {
+        db.run("ALTER TABLE shelves ADD COLUMN row_count INTEGER DEFAULT 4");
+      }
+      db.run("INSERT OR REPLACE INTO _meta (key, value) VALUES ('schema_version', ?)", [String(SCHEMA_VERSION)]);
+      console.log('[DB] v4 → v5 迁移完成');
+    } catch (e) {
+      console.warn('[DB] 迁移失败（可能已是 v5）:', e.message);
     }
   }
 
@@ -247,7 +263,7 @@ const DB = (() => {
 
   function rowToShelf(row) {
     if (!row) return null;
-    return { id: row[0], name: row[1], space_id: row[2], server_id: row[3], owner_id: row[4], createdAt: row[5] };
+    return { id: row[0], name: row[1], space_id: row[2], server_id: row[3], owner_id: row[4], rowCount: row[5], createdAt: row[6] };
   }
 
   // ---- 初始化 ----
@@ -278,6 +294,7 @@ const DB = (() => {
         migrateV1toV2();
         migrateV2toV3();
         migrateV3toV4();
+        migrateV4toV5();
         console.log('[DB] 从 OPFS 加载已有数据库');
       } else {
         db = new SQL.Database();
@@ -293,10 +310,11 @@ const DB = (() => {
 
   // ---- Shelves ----
 
-  async function createShelf(name, ownerId) {
+  async function createShelf(name, ownerId, rowCount) {
     await open();
     const oid = ownerId || 'anon';
-    db.run('INSERT INTO shelves (name, space_id, owner_id, createdAt) VALUES (?, ?, ?, ?)', [name, 'personal', oid, Date.now()]);
+    const rc = rowCount || 4;
+    db.run('INSERT INTO shelves (name, space_id, owner_id, row_count, createdAt) VALUES (?, ?, ?, ?, ?)', [name, 'personal', oid, rc, Date.now()]);
     const result = db.exec('SELECT last_insert_rowid()');
     scheduleSave();
     return result[0].values[0][0];
@@ -316,6 +334,12 @@ const DB = (() => {
   async function updateShelf(id, name) {
     await open();
     db.run('UPDATE shelves SET name = ? WHERE id = ?', [name, id]);
+    scheduleSave();
+  }
+
+  async function updateShelfRowCount(id, rowCount) {
+    await open();
+    db.run('UPDATE shelves SET row_count = ? WHERE id = ?', [rowCount, id]);
     scheduleSave();
   }
 
@@ -517,7 +541,7 @@ const DB = (() => {
   return {
     open, saveNow,
     // Shelves
-    createShelf, getAllShelves, updateShelf, deleteShelf,
+    createShelf, getAllShelves, updateShelf, updateShelfRowCount, deleteShelf,
     // Parts
     add, update, remove, get, getByPosition, getByShelf, getAll, migratePartsToShelf,
     // Spaces (v2)

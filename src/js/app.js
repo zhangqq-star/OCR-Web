@@ -796,8 +796,11 @@ function bindEvents() {
   document.getElementById('btnShelfPrev').addEventListener('click', Shelf.switchToPrev);
   document.getElementById('btnShelfNext').addEventListener('click', Shelf.switchToNext);
   document.getElementById('btnShelfAdd').addEventListener('click', Shelf.createShelf);
+  document.getElementById('btnShelfDelete').addEventListener('click', Shelf.deleteCurrent);
   document.getElementById('shelfName').addEventListener('click', Shelf.renameCurrent);
   document.getElementById('shelfName').addEventListener('dblclick', Shelf.renameCurrent);
+  document.getElementById('btnShelfAddRow').addEventListener('click', Shelf.addRow);
+  document.getElementById('btnShelfRemoveRow').addEventListener('click', Shelf.removeRow);
 
   // 批量管理
   document.getElementById('btnBatchManage').addEventListener('click', () => {
@@ -831,7 +834,7 @@ function bindEvents() {
 
   // 导入配置变化 → 重新渲染预览
   document.querySelectorAll('#importTarget .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       document.querySelectorAll('#importTarget .seg-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (btn.dataset.target === 'new') {
@@ -841,6 +844,7 @@ function bindEvents() {
         document.getElementById('importShelfRow').classList.remove('hidden');
         document.getElementById('importNewShelfRow').classList.add('hidden');
       }
+      await Importer.refreshTargetRowCount();
       Importer.renderImportPreview();
     });
   });
@@ -856,6 +860,7 @@ function bindEvents() {
       document.getElementById('importNewShelfRow').classList.add('hidden');
       document.getElementById('importTargetRow').classList.toggle('hidden', isByShelf);
       if (!isByShelf) await Importer.resetTargetUI(true);
+      await Importer.refreshTargetRowCount();
       Importer.renderImportPreview();
     });
   });
@@ -879,7 +884,16 @@ function bindEvents() {
       Importer.renderImportPreview();
     });
   });
-  document.getElementById('importShelfSelect').addEventListener('change', Importer.renderImportPreview);
+  document.getElementById('importShelfSelect').addEventListener('change', async () => {
+    await Importer.refreshTargetRowCount();
+    Importer.renderImportPreview();
+  });
+  document.getElementById('importGroupShelfSelect').addEventListener('change', async () => {
+    await Importer.refreshTargetRowCount();
+    Importer.renderImportPreview();
+  });
+  document.getElementById('btnImportRowMinus').addEventListener('click', () => Importer.adjustImportRowCount(-1));
+  document.getElementById('btnImportRowPlus').addEventListener('click', () => Importer.adjustImportRowCount(1));
 
   // 导入汇总
   document.getElementById('btnImportSummaryClose').addEventListener('click', Importer.closeSummary);
@@ -1032,6 +1046,11 @@ async function init() {
   await Auth.init();
   await Shelf.init();
   updateAuthUI();
+
+  // 如果初始化期间用户已切换到货架视图，补一次渲染
+  if (document.getElementById('viewShelf').classList.contains('active')) {
+    Shelf.render();
+  }
 
   if ('serviceWorker' in navigator) {
     try {

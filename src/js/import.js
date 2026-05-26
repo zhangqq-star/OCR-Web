@@ -2,13 +2,14 @@
  * Excel 导入模块 v2.0 — 多 Sheet、多货架列、起始位置、溢出续架
  */
 const Importer = (() => {
-  const ROWS = 4, COLS = 8, MAX_CELLS = ROWS * COLS;
+  const COLS = 8;
   let workbookData = null;
   let activeSheet = '';
   let parsedRows = [];
   let shelfGroups = null;
   let activeGroupShelf = '';
   let startRow = 0, startCol = 0;
+  let targetRowCount = 4;
 
   function triggerFilePicker() {
     const input = document.createElement('input');
@@ -65,7 +66,7 @@ const Importer = (() => {
       if (excelRow !== '' && excelRow != null && excelCol !== '' && excelCol != null) {
         const r = parseInt(excelRow) - 1;
         const c = parseInt(excelCol) - 1;
-        if (r >= 0 && r < ROWS && c >= 0 && c < COLS) { shelfRow = r; shelfCol = c; }
+        if (r >= 0 && c >= 0 && c < COLS) { shelfRow = r; shelfCol = c; }
       }
 
       rows.push({
@@ -122,6 +123,7 @@ const Importer = (() => {
     }
 
     await resetTargetUI();
+    await refreshTargetRowCount();
 
     document.querySelector('#importDirection .seg-btn.active')?.classList.remove('active');
     document.querySelector('#importDirection [data-dir="row-first"]').classList.add('active');
@@ -169,6 +171,39 @@ const Importer = (() => {
     ).join('');
   }
 
+  async function refreshTargetRowCount() {
+    const config = getConfig();
+    if (config.groupTarget === 'by-shelf' && shelfGroups) {
+      // 按货架分组时，以当前预览货架为准
+      const shelves = await DB.getAllShelves(Auth.getOwnerId());
+      const existing = shelves.find(s => s.name === activeGroupShelf);
+      targetRowCount = existing ? (existing.rowCount || 4) : 4;
+    } else if (config.target === 'overwrite') {
+      const shelfId = parseInt(document.getElementById('importShelfSelect').value);
+      const shelves = await DB.getAllShelves(Auth.getOwnerId());
+      const s = shelves.find(s => s.id === shelfId);
+      targetRowCount = s ? (s.rowCount || 4) : 4;
+    } else {
+      targetRowCount = 4;
+    }
+    updateImportRowCountUI();
+  }
+
+  function updateImportRowCountUI() {
+    const el = document.getElementById('importRowCount');
+    if (el) el.textContent = `${targetRowCount} 行`;
+    const btnMinus = document.getElementById('btnImportRowMinus');
+    if (btnMinus) btnMinus.disabled = targetRowCount <= 1;
+  }
+
+  function adjustImportRowCount(delta) {
+    const newCount = targetRowCount + delta;
+    if (newCount < 1) return;
+    targetRowCount = newCount;
+    updateImportRowCountUI();
+    renderImportPreview();
+  }
+
   function renderGroupSelect() {
     const select = document.getElementById('importGroupShelfSelect');
     const names = Object.keys(shelfGroups);
@@ -208,11 +243,12 @@ const Importer = (() => {
 
     const autoCount = parsedRows.filter(r => r.shelfRow == null).length;
     const occupiedCount = getOccupiedCount(config);
-    const available = MAX_CELLS - occupiedCount;
+    const maxCells = targetRowCount * COLS;
+    const available = maxCells - occupiedCount;
 
     if (autoCount > available && available >= 0) {
       const overflow = autoCount - available;
-      const spillShelves = Math.ceil(overflow / MAX_CELLS);
+      const spillShelves = Math.ceil(overflow / maxCells);
       el.textContent = `当前货架仅剩 ${available} 空位，将自动创建 ${spillShelves} 个续架容纳剩余 ${overflow} 行`;
       el.classList.remove('hidden');
     } else {
@@ -268,13 +304,14 @@ const Importer = (() => {
       const autoRows = [...autoPool, ...rows.filter(r => r.shelfRow == null)];
       const cursor = { r: sRow, c: sCol };
       let spillIdx = 0;
+      const maxCells = targetRowCount * COLS;
 
       for (const row of autoRows) {
         if (stopped) break;
         let safety = 0;
-        while (safety < MAX_CELLS * 20) {
+        while (safety < maxCells * 20) {
           safety++;
-          if (cursor.r >= ROWS || cursor.c >= COLS) {
+          if (cursor.r >= targetRowCount || cursor.c >= COLS) {
             spillIdx++;
             cursor.r = 0; cursor.c = 0;
           }
@@ -321,7 +358,7 @@ const Importer = (() => {
       if (cur.c >= COLS) { cur.c = 0; cur.r++; }
     } else {
       cur.r++;
-      if (cur.r >= ROWS) { cur.r = 0; cur.c++; }
+      if (cur.r >= targetRowCount) { cur.r = 0; cur.c++; }
     }
   }
 
@@ -417,21 +454,22 @@ const Importer = (() => {
   function renderGrid(grid, occupiedMap, planMap, sRow, sCol, direction) {
     grid.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
     grid.innerHTML = '';
+    const maxCells = targetRowCount * COLS;
 
     // 计算路径
     const pathCells = [];
     let pr = sRow, pc = sCol;
-    for (let i = 0; i < MAX_CELLS && pathCells.length < MAX_CELLS; i++) {
-      if (pr >= ROWS) break;
+    for (let i = 0; i < maxCells && pathCells.length < maxCells; i++) {
+      if (pr >= targetRowCount) break;
       const key = `${pr}_${pc}`;
       if (!planMap.has(key) && !occupiedMap.has(key)) {
         pathCells.push(key);
       }
       if (direction === 'row-first') { pc++; if (pc >= COLS) { pc = 0; pr++; } }
-      else { pr++; if (pr >= ROWS) { pr = 0; pc++; } }
+      else { pr++; if (pr >= targetRowCount) { pr = 0; pc++; } }
     }
 
-    for (let row = 0; row < ROWS; row++) {
+    for (let row = 0; row < targetRowCount; row++) {
       for (let col = 0; col < COLS; col++) {
         const key = `${row}_${col}`;
         const planItem = planMap.get(key);
@@ -498,12 +536,13 @@ const Importer = (() => {
     if (config.target === 'new') {
       const name = document.getElementById('importNewShelfName').value.trim();
       if (!name) { showToast('请输入新货架名称'); return; }
-      targetShelfId = await DB.createShelf(name, Auth.getOwnerId());
+      targetShelfId = await DB.createShelf(name, Auth.getOwnerId(), targetRowCount);
       baseShelfName = name;
     } else {
       targetShelfId = parseInt(document.getElementById('importShelfSelect').value);
       const shelves = await DB.getAllShelves(Auth.getOwnerId());
       baseShelfName = shelves.find(s => s.id === targetShelfId)?.name || '货架';
+      await DB.updateShelfRowCount(targetShelfId, targetRowCount);
     }
 
     const parts = await DB.getByShelf(targetShelfId);
@@ -571,9 +610,11 @@ const Importer = (() => {
     for (const [shelfName, plan] of Object.entries(plans)) {
       let shelfId = shelfNameToId.get(shelfName);
       if (!shelfId) {
-        shelfId = await DB.createShelf(shelfName, Auth.getOwnerId());
+        shelfId = await DB.createShelf(shelfName, Auth.getOwnerId(), targetRowCount);
         shelfNameToId.set(shelfName, shelfId);
         newShelves++;
+      } else {
+        await DB.updateShelfRowCount(shelfId, targetRowCount);
       }
 
       const parts = await DB.getByShelf(shelfId);
@@ -653,6 +694,7 @@ const Importer = (() => {
     triggerFilePicker, closeModal, closeSummary,
     executeImport, renderImportPreview,
     switchSheet, switchGroupShelf, resetTargetUI,
+    adjustImportRowCount, refreshTargetRowCount,
     get shelfGroups() { return shelfGroups; },
   };
 })();

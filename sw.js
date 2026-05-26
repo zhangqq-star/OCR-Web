@@ -3,7 +3,7 @@
  * v3: 新增账号模块，排除 API 路径
  */
 
-const CACHE_NAME = 'ocr-shelf-v3';
+const CACHE_NAME = 'ocr-shelf-v4';
 
 const PRE_CACHE = [
   './',

@@ -66,11 +66,19 @@
     <!-- 货架视图 -->
     <section id="viewShelf" class="view">
       <div class="shelf-nav">
-        <button id="btnShelfPrev" class="btn-nav-arrow" title="上一个货架">◀</button>
-        <span id="shelfName" class="shelf-name">货架 1</span>
-        <button id="btnShelfNext" class="btn-nav-arrow" title="下一个货架">▶</button>
-        <button id="btnShelfAdd" class="btn-nav-add" title="新建货架">＋</button>
-        <button id="btnBatchManage" class="btn-nav-manage" title="批量管理">✏️</button>
+        <div class="shelf-nav-row">
+          <button id="btnShelfPrev" class="btn-nav-arrow" title="上一个货架">◀</button>
+          <span id="shelfName" class="shelf-name">货架 1</span>
+          <button id="btnShelfNext" class="btn-nav-arrow" title="下一个货架">▶</button>
+          <button id="btnShelfAdd" class="btn-nav-add" title="新建货架">＋</button>
+        </div>
+        <div class="shelf-nav-row">
+          <span id="shelfRowCount" class="shelf-row-count">4 行</span>
+          <button id="btnShelfAddRow" class="btn-nav-row" title="增加一行">＋</button>
+          <button id="btnShelfRemoveRow" class="btn-nav-row" title="减少一行">－</button>
+          <button id="btnShelfDelete" class="btn-nav-delete" title="删除当前货架">🗑</button>
+          <button id="btnBatchManage" class="btn-nav-manage" title="批量管理">✏️</button>
+        </div>
       </div>
       <div id="shelfSwipeArea" class="shelf-swipe-area">
         <div id="shelfGrid" class="shelf-grid"></div>
@@ -296,6 +304,15 @@
       <div id="importGroupInfoRow" class="hidden">
         <label>预览货架</label>
         <select id="importGroupShelfSelect" class="batch-shelf-select"></select>
+      </div>
+
+      <div id="importRowControlRow">
+        <label>货架行数</label>
+        <div class="row-control">
+          <button id="btnImportRowMinus" type="button" class="btn-row-control" title="减少一行">－</button>
+          <span id="importRowCount" class="row-count-display">4 行</span>
+          <button id="btnImportRowPlus" type="button" class="btn-row-control" title="增加一行">＋</button>
+        </div>
       </div>
 
       <label>填充方向</label>

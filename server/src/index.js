@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const path = require('path');
+const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const config = require('./config');
 const db = require('./db');
 const { requireAuth } = require('./middleware/auth');
@@ -164,9 +167,38 @@ async function main() {
     res.status(500).json({ ok: false, error: '服务器内部错误' });
   });
 
-  app.listen(config.PORT, () => {
-    console.log(`[Server] OCR 货架管理后端已启动 → http://localhost:${config.PORT}`);
-  });
+  function getLocalIP() {
+    const { networkInterfaces } = require('os');
+    const nets = networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name]) {
+        if (net.family === 'IPv4' && !net.internal) return net.address;
+      }
+    }
+    return null;
+  }
+
+  const certDir = path.join(__dirname, '..', 'cert');
+  const keyPath = path.join(certDir, 'key.pem');
+  const certPath = path.join(certDir, 'cert.pem');
+  const useHttps = process.env.HTTPS === 'true' && fs.existsSync(keyPath) && fs.existsSync(certPath);
+
+  if (useHttps) {
+    const ssl = { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+    const server = https.createServer(ssl, app);
+    server.listen(config.PORT, () => {
+      const ip = getLocalIP();
+      console.log(`[Server] HTTPS 模式已启动 → https://localhost:${config.PORT}`);
+      if (ip) console.log(`[Server] 手机访问 → https://${ip}:${config.PORT}`);
+    });
+  } else {
+    http.createServer(app).listen(config.PORT, () => {
+      const ip = getLocalIP();
+      console.log(`[Server] OCR 货架管理后端已启动 → http://localhost:${config.PORT}`);
+      if (ip) console.log(`[Server] 手机访问 → http://${ip}:${config.PORT}`);
+      if (!fs.existsSync(keyPath)) console.log('[Server] 提示: 运行 node src/gen-cert.js 生成证书后可 HTTPS 访问');
+    });
+  }
 }
 
 main().catch(err => {

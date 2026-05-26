@@ -2,11 +2,11 @@
  * 货架模块 — 多货架渲染(固定8列)、滑动切换、长按移动/交换
  */
 const Shelf = (() => {
-  const ROWS = 4;
   const COLS = 8;
 
   let activeShelfId = null;
   let shelves = [];
+  let ready = false;
 
   // 滑动切换
   let swipeStartX = 0, swipeStartY = 0, swipeMoved = false;
@@ -22,6 +22,10 @@ const Shelf = (() => {
   let selectedParts = new Set();
 
   function getCols() { return COLS; }
+  function getRows() {
+    const s = shelves.find(s => s.id === activeShelfId);
+    return s && s.rowCount ? s.rowCount : 4;
+  }
   function getActiveShelfId() { return activeShelfId; }
   function getActiveShelfName() {
     const s = shelves.find(s => s.id === activeShelfId);
@@ -43,6 +47,7 @@ const Shelf = (() => {
     } else if (shelves.length > 0) {
       activeShelfId = shelves[0].id;
     }
+    ready = true;
     return activeShelfId;
   }
 
@@ -85,6 +90,36 @@ const Shelf = (() => {
     showToast('货架已删除');
   }
 
+  async function addRow() {
+    const current = shelves.find(s => s.id === activeShelfId);
+    if (!current) return;
+    const newCount = (current.rowCount || 4) + 1;
+    await DB.updateShelfRowCount(activeShelfId, newCount);
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
+    await render();
+    showToast(`已增加到 ${newCount} 行`);
+  }
+
+  async function removeRow() {
+    const current = shelves.find(s => s.id === activeShelfId);
+    if (!current) return;
+    const rc = current.rowCount || 4;
+    if (rc <= 1) { showToast('至少保留 1 行'); return; }
+    const newCount = rc - 1;
+    const parts = await DataStore.getByShelf(activeShelfId);
+    const partsInLastRow = parts.filter(p => p.shelfRow === newCount);
+    if (partsInLastRow.length > 0) {
+      if (!confirm(`第 ${newCount + 1} 行有 ${partsInLastRow.length} 个零件，删除该行将同时删除这些零件，确定吗？`)) return;
+      for (const p of partsInLastRow) {
+        await DataStore.removePart(p.id);
+      }
+    }
+    await DB.updateShelfRowCount(activeShelfId, newCount);
+    shelves = await DB.getAllShelves(Auth.getOwnerId());
+    await render();
+    showToast(`已减少到 ${newCount} 行`);
+  }
+
   async function switchTo(id, direction) {
     if (id === activeShelfId) return;
     exitBatchMode();
@@ -119,6 +154,9 @@ const Shelf = (() => {
     const current = shelves.find(s => s.id === activeShelfId);
     document.getElementById('shelfName').textContent = current ? current.name : '';
     document.getElementById('shelfIndicator').textContent = shelves.length > 1 ? `${idx + 1} / ${shelves.length}` : '';
+    const rc = getRows();
+    document.getElementById('shelfRowCount').textContent = `${rc} 行`;
+    document.getElementById('btnShelfRemoveRow').disabled = rc <= 1;
   }
 
   function updateStats(count) {
@@ -128,6 +166,7 @@ const Shelf = (() => {
   // ---- 渲染 ----
 
   async function render() {
+    if (!ready) return;
     cancelMoveMode();
     const grid = document.getElementById('shelfGrid');
     grid.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
@@ -143,8 +182,9 @@ const Shelf = (() => {
     });
 
     grid.innerHTML = '';
+    const rows = getRows();
 
-    for (let row = 0; row < ROWS; row++) {
+    for (let row = 0; row < rows; row++) {
       for (let col = 0; col < COLS; col++) {
         const key = `${row}_${col}`;
         const partsAtPos = byPos[key];
@@ -506,12 +546,14 @@ const Shelf = (() => {
     init,
     render,
     getCols,
-    getRows: () => ROWS,
+    getRows,
     getActiveShelfId,
     getActiveShelfName,
     createShelf,
     renameCurrent,
     deleteCurrent,
+    addRow,
+    removeRow,
     switchTo,
     switchToPrev,
     switchToNext,
