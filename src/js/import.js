@@ -57,9 +57,14 @@ const Importer = (() => {
   function parseRows(json) {
     const rows = [];
     for (const row of json) {
-      const code = String(row['编号'] || '').trim();
+      let code = String(row['编号'] || '').trim();
       const name = String(row['名称'] || '').trim();
       if (!code && !name) continue;
+
+      // 编号不足10位，左边补0
+      if (code && /^\d+$/.test(code) && code.length < 10) {
+        code = code.padStart(10, '0');
+      }
 
       let shelfRow = null, shelfCol = null;
       const excelRow = row['货架行'], excelCol = row['货架列'];
@@ -125,14 +130,19 @@ const Importer = (() => {
     await resetTargetUI();
     await refreshTargetRowCount();
 
-    document.querySelector('#importDirection .seg-btn.active')?.classList.remove('active');
-    document.querySelector('#importDirection [data-dir="row-first"]').classList.add('active');
-    document.querySelector('#importPolicy .seg-btn.active')?.classList.remove('active');
-    document.querySelector('#importPolicy [data-policy="skip"]').classList.add('active');
+    resetSegControl('#importDirection', 0);
+    resetSegControl('#importPolicy', 0);
 
     updateImportSummary();
     await renderImportPreview();
     document.getElementById('modalImport').classList.remove('hidden');
+  }
+
+  function resetSegControl(selector, idx) {
+    const ctrl = document.querySelector(selector);
+    const btns = ctrl.querySelectorAll('.seg-btn');
+    btns.forEach((b, i) => b.classList.toggle('active', i === idx));
+    ctrl.setAttribute('data-active', idx + 1);
   }
 
   async function resetTargetUI(forceSingle = false) {
@@ -148,15 +158,13 @@ const Importer = (() => {
       groupInfoRow.classList.remove('hidden');
       shelfRow.classList.add('hidden');
       newShelfRow.classList.add('hidden');
-      document.querySelector('#importGroupTarget .seg-btn.active')?.classList.remove('active');
-      document.querySelector('#importGroupTarget [data-target="by-shelf"]').classList.add('active');
+      resetSegControl('#importGroupTarget', 0);
       renderGroupSelect();
     } else {
       targetRow.classList.remove('hidden');
       groupTargetRow.classList.add('hidden');
       groupInfoRow.classList.add('hidden');
-      document.querySelector('#importTarget .seg-btn.active')?.classList.remove('active');
-      document.querySelector('#importTarget [data-target="overwrite"]').classList.add('active');
+      resetSegControl('#importTarget', 0);
       document.getElementById('importShelfRow').classList.remove('hidden');
       document.getElementById('importNewShelfRow').classList.add('hidden');
       await fillShelfSelect();

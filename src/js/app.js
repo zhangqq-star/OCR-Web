@@ -316,10 +316,12 @@ async function openBatchStartModal() {
   ).join('');
 
   // 重置分段控件
-  document.querySelector('#batchDirection .seg-btn.active').classList.remove('active');
-  document.querySelector('#batchDirection [data-dir="row-first"]').classList.add('active');
-  document.querySelector('#batchPolicy .seg-btn.active').classList.remove('active');
-  document.querySelector('#batchPolicy [data-policy="skip"]').classList.add('active');
+  const dirCtrl = document.querySelector('#batchDirection');
+  dirCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  dirCtrl.setAttribute('data-active', '1');
+  const polCtrl = document.querySelector('#batchPolicy');
+  polCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  polCtrl.setAttribute('data-active', '1');
 
   batchState = null; // 还没正式开始，先清空
   renderBatchPositionGrid();
@@ -747,18 +749,10 @@ function bindEvents() {
 
   // 连续导入 — 方向/策略切换时重新渲染预览
   document.querySelectorAll('#batchDirection .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#batchDirection .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderBatchPositionGrid();
-    });
+    btn.addEventListener('click', () => renderBatchPositionGrid());
   });
   document.querySelectorAll('#batchPolicy .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#batchPolicy .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      renderBatchPositionGrid();
-    });
+    btn.addEventListener('click', () => renderBatchPositionGrid());
   });
 
   // 连续导入 — 货架切换时重新渲染预览
@@ -818,7 +812,10 @@ function bindEvents() {
   Shelf.setupSwipe();
 
   // 导出
-  document.getElementById('btnExport').addEventListener('click', Exporter.exportToExcel);
+  document.getElementById('btnExport').addEventListener('click', Exporter.openExportModal);
+  document.getElementById('btnExportConfirm').addEventListener('click', Exporter.doExport);
+  document.getElementById('btnExportCancel').addEventListener('click', Exporter.closeExportModal);
+  document.getElementById('modalExport').querySelector('.modal-backdrop').addEventListener('click', Exporter.closeExportModal);
 
   // 导入 Excel
   document.getElementById('btnImport').addEventListener('click', Importer.triggerFilePicker);
@@ -835,8 +832,6 @@ function bindEvents() {
   // 导入配置变化 → 重新渲染预览
   document.querySelectorAll('#importTarget .seg-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      document.querySelectorAll('#importTarget .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       if (btn.dataset.target === 'new') {
         document.getElementById('importShelfRow').classList.add('hidden');
         document.getElementById('importNewShelfRow').classList.remove('hidden');
@@ -852,8 +847,6 @@ function bindEvents() {
   // 导入分组目标切换
   document.querySelectorAll('#importGroupTarget .seg-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      document.querySelectorAll('#importGroupTarget .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       const isByShelf = btn.dataset.target === 'by-shelf';
       document.getElementById('importGroupInfoRow').classList.toggle('hidden', !isByShelf);
       document.getElementById('importShelfRow').classList.toggle('hidden', isByShelf);
@@ -871,18 +864,10 @@ function bindEvents() {
   });
 
   document.querySelectorAll('#importDirection .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#importDirection .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      Importer.renderImportPreview();
-    });
+    btn.addEventListener('click', () => Importer.renderImportPreview());
   });
   document.querySelectorAll('#importPolicy .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('#importPolicy .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      Importer.renderImportPreview();
-    });
+    btn.addEventListener('click', () => Importer.renderImportPreview());
   });
   document.getElementById('importShelfSelect').addEventListener('change', async () => {
     await Importer.refreshTargetRowCount();
@@ -952,8 +937,10 @@ function bindEvents() {
 // ---- 登录/注册 ----
 
 function showLogin() {
-  document.getElementById('loginUsername').value = '';
+  const remembered = Auth.getRemembered();
+  document.getElementById('loginUsername').value = remembered;
   document.getElementById('loginPassword').value = '';
+  document.getElementById('loginRemember').checked = !!remembered;
   document.getElementById('loginError').classList.add('hidden');
   document.getElementById('modalLogin').classList.remove('hidden');
 }
@@ -976,6 +963,11 @@ async function doLogin(e) {
 
   try {
     await Auth.login(username, password);
+    if (document.getElementById('loginRemember').checked) {
+      Auth.saveRemembered(username);
+    } else {
+      Auth.clearRemembered();
+    }
     document.getElementById('modalLogin').classList.add('hidden');
     updateAuthUI();
     await Shelf.init();
@@ -1039,9 +1031,32 @@ function updateAuthUI() {
   }
 }
 
+// ===== 分段选择器滑块动画 =====
+function setSegActive(ctrl, idx) {
+  const btns = ctrl.querySelectorAll('.seg-btn');
+  btns.forEach((b, i) => b.classList.toggle('active', i === idx));
+  ctrl.setAttribute('data-active', idx + 1);
+}
+
+function initSegmentedControls() {
+  document.querySelectorAll('.segmented-control').forEach(ctrl => {
+    const btns = ctrl.querySelectorAll('.seg-btn');
+    ctrl.setAttribute('data-seg-count', btns.length);
+
+    btns.forEach((btn, i) => {
+      btn.addEventListener('click', () => setSegActive(ctrl, i));
+    });
+
+    const idx = Array.from(btns).findIndex(b => b.classList.contains('active'));
+    ctrl.setAttribute('data-active', idx + 1);
+  });
+}
+
 // ===== 初始化 =====
 async function init() {
+  CustomSelect.initAll();
   bindEvents();
+  initSegmentedControls();
   await DB.open();
   await Auth.init();
   await Shelf.init();

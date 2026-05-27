@@ -98,6 +98,22 @@ const Auth = (() => {
     clearSession();
   }
 
+  // ---- 记住密码 ----
+
+  const REMEMBER_KEY = 'auth_remembered';
+
+  function saveRemembered(username) {
+    localStorage.setItem(REMEMBER_KEY, username);
+  }
+
+  function getRemembered() {
+    return localStorage.getItem(REMEMBER_KEY) || '';
+  }
+
+  function clearRemembered() {
+    localStorage.removeItem(REMEMBER_KEY);
+  }
+
   async function updateProfile(fields) {
     if (!currentUser) throw new Error('未登录');
     await DB.updateLocalUser(currentUser.id, fields);
@@ -116,5 +132,5 @@ const Auth = (() => {
     return bytes;
   }
 
-  return { init, isLoggedIn, getToken, getUser, getOwnerId, login, register, logout, updateProfile };
+  return { init, isLoggedIn, getToken, getUser, getOwnerId, login, register, logout, updateProfile, saveRemembered, getRemembered, clearRemembered };
 })();

@@ -23,7 +23,8 @@ const DB = (() => {
       const file = await fileHandle.getFile();
       const buffer = await file.arrayBuffer();
       return new Uint8Array(buffer);
-    } catch {
+    } catch (e) {
+      console.warn('[DB] OPFS 读取失败:', e.message);
       return null;
     }
   }
@@ -36,10 +37,14 @@ const DB = (() => {
       await writable.write(data);
       await writable.close();
     } catch (e) {
-      console.warn('[DB] OPFS 写入失败，回退到 localStorage:', e);
-      // 回退：存 base64 到 localStorage
+      console.warn('[DB] OPFS 写入失败:', e);
+    }
+    // 始终同步备份到 localStorage
+    try {
       const base64 = arrayToBase64(data);
       localStorage.setItem(DB_FILE, base64);
+    } catch (e) {
+      console.warn('[DB] localStorage 备份失败:', e);
     }
   }
 
@@ -277,14 +282,20 @@ const DB = (() => {
         locateFile: (file) => `https://cdn.jsdelivr.net/npm/sql.js@1.10/dist/${file}`,
       });
 
-      // 尝试从 OPFS 加载已有数据库
+      // 优先从 OPFS 加载
       let savedData = await loadFromOPFS();
+      let source = 'opfs';
 
-      // OPFS 不可用时回退到 localStorage
+      // OPFS 没数据时回退到 localStorage 备份
       if (!savedData) {
         const base64 = localStorage.getItem(DB_FILE);
         if (base64) {
-          try { savedData = base64ToArray(base64); } catch (e) { /* ignore */ }
+          try {
+            savedData = base64ToArray(base64);
+            source = 'localStorage';
+          } catch (e) {
+            console.warn('[DB] localStorage 数据解析失败:', e.message);
+          }
         }
       }
 
@@ -295,11 +306,13 @@ const DB = (() => {
         migrateV2toV3();
         migrateV3toV4();
         migrateV4toV5();
-        console.log('[DB] 从 OPFS 加载已有数据库');
+        // 加载后立即保存一次，确保 localStorage 备份同步
+        scheduleSave();
+        console.log(`[DB] 从 ${source} 加载数据库，大小: ${savedData.length} bytes`);
       } else {
         db = new SQL.Database();
         createSchema();
-        console.log('[DB] 创建新数据库');
+        console.log('[DB] 无已有数据，创建新数据库');
       }
 
       return db;
@@ -428,80 +441,6 @@ const DB = (() => {
     scheduleSave();
   }
 
-  // ---- Spaces (v2) ----
-
-  async function getSpaces() {
-    await open();
-    const result = db.exec('SELECT * FROM spaces ORDER BY type, name');
-    if (!result.length || !result[0].values.length) {
-      // 首次：自动创建个人空间
-      db.run("INSERT INTO spaces (id, name, type) VALUES ('personal', '个人空间', 'personal')");
-      scheduleSave();
-      return [{ id: 'personal', name: '个人空间', type: 'personal', server_id: null, synced_at: null }];
-    }
-    return result[0].values.map(r => ({ id: r[0], name: r[1], type: r[2], server_id: r[3], synced_at: r[4] }));
-  }
-
-  async function createSpace(id, name, type, serverId) {
-    await open();
-    db.run('INSERT OR REPLACE INTO spaces (id, name, type, server_id, synced_at) VALUES (?, ?, ?, ?, ?)',
-      [id, name, type, serverId || null, Date.now()]);
-    scheduleSave();
-  }
-
-  async function updateSpaceSyncTime(spaceId) {
-    await open();
-    db.run('UPDATE spaces SET synced_at = ? WHERE id = ?', [Date.now(), spaceId]);
-    scheduleSave();
-  }
-
-  async function getShelvesBySpace(spaceId) {
-    await open();
-    const result = db.exec('SELECT * FROM shelves WHERE space_id = ? ORDER BY createdAt', [spaceId]);
-    if (!result.length || !result[0].values.length) return [];
-    return result[0].values.map(rowToShelf);
-  }
-
-  async function updateShelfServerId(localId, serverId) {
-    await open();
-    db.run('UPDATE shelves SET server_id = ? WHERE id = ?', [serverId, localId]);
-    scheduleSave();
-  }
-
-  // ---- Sync Queue (v2) ----
-
-  async function enqueueSync(tableName, recordId, operation, endpoint, payload) {
-    await open();
-    db.run(
-      'INSERT INTO sync_queue (table_name, record_id, operation, endpoint, payload, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      [tableName, recordId, operation, endpoint, JSON.stringify(payload), Date.now()]
-    );
-    scheduleSave();
-  }
-
-  async function getSyncQueue() {
-    await open();
-    const result = db.exec('SELECT * FROM sync_queue ORDER BY id');
-    if (!result.length || !result[0].values.length) return [];
-    return result[0].values.map(r => ({
-      id: r[0], table_name: r[1], record_id: r[2],
-      operation: r[3], endpoint: r[4], payload: JSON.parse(r[5] || '{}'), created_at: r[6],
-    }));
-  }
-
-  async function clearSyncEntry(id) {
-    await open();
-    db.run('DELETE FROM sync_queue WHERE id = ?', [id]);
-    scheduleSave();
-  }
-
-  async function countSyncQueue() {
-    await open();
-    const result = db.exec('SELECT COUNT(*) as count FROM sync_queue');
-    if (!result.length || !result[0].values.length) return 0;
-    return result[0].values[0][0];
-  }
-
   // ---- Local Users (v3) ----
 
   function rowToUser(row) {
@@ -544,10 +483,6 @@ const DB = (() => {
     createShelf, getAllShelves, updateShelf, updateShelfRowCount, deleteShelf,
     // Parts
     add, update, remove, get, getByPosition, getByShelf, getAll, migratePartsToShelf,
-    // Spaces (v2)
-    getSpaces, createSpace, updateSpaceSyncTime, getShelvesBySpace, updateShelfServerId,
-    // Sync (v2)
-    enqueueSync, getSyncQueue, clearSyncEntry, countSyncQueue,
     // Local Users (v3)
     createLocalUser, getLocalUser, updateLocalUser,
   };

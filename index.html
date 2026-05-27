@@ -232,6 +232,9 @@
         <input type="text" id="loginUsername" autocomplete="username" required>
         <label>密码</label>
         <input type="password" id="loginPassword" autocomplete="current-password" required>
+        <label class="remember-me">
+          <input type="checkbox" id="loginRemember"> 记住密码
+        </label>
         <div id="loginError" class="auth-error hidden"></div>
         <div class="modal-actions">
           <button type="button" id="btnLoginCancel" class="btn-secondary">取消</button>
@@ -368,16 +371,38 @@
     </div>
   </div>
 
+  <!-- 导出选择弹窗 -->
+  <div id="modalExport" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>📥 导出 Excel</h3>
+      <label>导出范围</label>
+      <div class="segmented-control" id="exportRange">
+        <button class="seg-btn active" data-range="current">当前货架</button>
+        <button class="seg-btn" data-range="all">全部货架</button>
+        <button class="seg-btn" data-range="select">选择货架</button>
+      </div>
+      <div id="exportShelfRow" class="hidden">
+        <label>目标货架</label>
+        <div id="exportShelfList" class="export-shelf-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="btnExportCancel" class="btn-secondary">取消</button>
+        <button id="btnExportConfirm" class="btn-primary">导出</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
 
   <script src="src/js/db.js"></script>
   <script src="src/js/auth.js"></script>
-  <script src="src/js/api.js"></script>
   <script src="src/js/camera.js"></script>
   <script src="src/js/ocr.js"></script>
   <script src="src/js/shelf.js"></script>
   <script src="src/js/export.js"></script>
   <script src="src/js/import.js"></script>
+  <script src="src/js/custom-select.js"></script>
   <script src="src/js/app.js"></script>
 </body>
 </html>

@@ -1,9 +1,8 @@
 /**
  * Service Worker — 离线缓存策略
- * v3: 新增账号模块，排除 API 路径
  */
 
-const CACHE_NAME = 'ocr-shelf-v4';
+const CACHE_NAME = 'ocr-shelf-v5';
 
 const PRE_CACHE = [
   './',
@@ -11,11 +10,12 @@ const PRE_CACHE = [
   './src/css/style.css',
   './src/js/db.js',
   './src/js/auth.js',
-  './src/js/api.js',
   './src/js/camera.js',
   './src/js/ocr.js',
   './src/js/shelf.js',
   './src/js/export.js',
+  './src/js/import.js',
+  './src/js/custom-select.js',
   './src/js/app.js',
   './manifest.json',
   './src/icons/icon-192.png',

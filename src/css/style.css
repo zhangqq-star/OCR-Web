@@ -959,14 +959,41 @@ input, textarea, button, select {
   background: rgba(255,255,255,0.35);
 }
 
-/* ===== 连续导入 — 分段选择器 ===== */
+/* ===== 分段选择器（带滑块动画） ===== */
 .segmented-control {
   display: flex;
+  position: relative;
   background: var(--bg-primary);
   border-radius: var(--radius-sm);
   padding: 2px;
-  gap: 1px;
 }
+
+.segmented-control::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  height: calc(100% - 4px);
+  width: calc(33.333% - 1.5px);
+  background: var(--bg-card);
+  border-radius: 6px;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 0;
+}
+
+.segmented-control[data-seg-count="2"]::before {
+  width: calc(50% - 1.5px);
+}
+
+.segmented-control[data-seg-count="4"]::before {
+  width: calc(25% - 1.5px);
+}
+
+.segmented-control[data-active="1"]::before { transform: translateX(0); }
+.segmented-control[data-active="2"]::before { transform: translateX(100%); }
+.segmented-control[data-active="3"]::before { transform: translateX(200%); }
+.segmented-control[data-active="4"]::before { transform: translateX(300%); }
 
 .seg-btn {
   flex: 1;
@@ -978,14 +1005,14 @@ input, textarea, button, select {
   font-size: 0.76rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  transition: color 0.2s;
   white-space: nowrap;
+  position: relative;
+  z-index: 1;
 }
 
 .seg-btn.active {
-  background: var(--bg-card);
   color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
 }
 
 /* ===== 连续导入 — 路径预览 ===== */
@@ -1029,17 +1056,186 @@ input, textarea, button, select {
 /* ===== 连续导入 — 货架选择 ===== */
 .batch-shelf-select {
   width: 100%;
-  padding: 10px 12px;
-  background: var(--bg-primary);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  padding: 12px 36px 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
   color: var(--text-primary);
-  font-size: 0.9rem;
-  appearance: auto;
+  font-size: 0.95rem;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23999' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  position: relative;
+  z-index: 10;
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
 .batch-shelf-select:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+
+/* ===== 自定义下拉 (iOS 风格) ===== */
+.custom-select {
+  position: relative;
+  width: 100%;
+}
+
+.custom-select-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 36px 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.custom-select-header::after {
+  content: '';
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #999;
+  position: absolute;
+  right: 14px;
+  transition: transform 0.25s;
+}
+
+.custom-select-header.open {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+}
+
+.custom-select-header.open::after {
+  transform: rotate(180deg);
+}
+
+.custom-select-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.custom-select-arrow {
+  display: none;
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0; right: 0;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 100;
+  -webkit-overflow-scrolling: touch;
+}
+
+.custom-select-dropdown.hidden {
+  display: none;
+}
+
+.custom-select-option {
+  padding: 12px 14px;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.custom-select-option:first-child {
+  border-radius: 10px 10px 0 0;
+}
+
+.custom-select-option:last-child {
+  border-radius: 0 0 10px 10px;
+}
+
+.custom-select-option:only-child {
+  border-radius: 10px;
+}
+
+.custom-select-option:hover {
+  background: var(--accent-light);
+}
+
+.custom-select-option.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.custom-select-option.active::after {
+  content: '✓';
+  float: right;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ===== 导出 — 货架列表 ===== */
+.export-shelf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.export-shelf-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-size: 0.9rem;
+}
+
+.export-shelf-item:active {
+  background: var(--accent-light);
+}
+
+.export-shelf-item.selected {
+  background: var(--bg-card);
+}
+
+.export-shelf-item .radio-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--separator);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.export-shelf-item.selected .radio-dot {
+  border-color: var(--accent);
+}
+
+.export-shelf-item.selected .radio-dot::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* ===== 连续导入 — 汇总 ===== */
@@ -1128,6 +1324,24 @@ input, textarea, button, select {
   display: flex;
   flex-direction: column;
   gap: 0;
+}
+.remember-me {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  margin-bottom: 0;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.remember-me input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
 }
 .auth-error {
   margin-top: 8px;
