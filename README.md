@@ -1,6 +1,6 @@
-# 货架管理 — OCR 零件管理系统 v2.0
+# 货架管理 — OCR 零件管理系统 v2.1
 
-本地化 OCR 货架管理系统，支持纯前端 PWA 本地模式。通过摄像头拍照 + Tesseract.js OCR 识别 10 位零件编号，存入货架网格进行可视化管理。v2.0 新增用户账号系统，支持本地认证。
+本地化 OCR 货架管理系统，支持纯前端 PWA 本地模式。通过摄像头拍照 + Tesseract.js OCR 识别 10 位零件编号，存入货架网格进行可视化管理。v2.0 新增用户账号系统，v2.1 新增二维码传输功能。
 
 ## 快速开始
 
@@ -27,7 +27,9 @@ python -m http.server 8080
 │   │   ├── camera.js   # 摄像头：MediaDevices 封装
 │   │   ├── shelf.js    # 货架模块：网格渲染、多货架切换、长按移动
 │   │   ├── export.js   # Excel 导出（SheetJS）
-│   │   └── import.js   # Excel 导入
+│   │   ├── import.js   # Excel 导入
+│   │   ├── qrcode.js   # 二维码生成（pako 压缩 + Logo 渲染）
+│   │   └── scanner.js  # 二维码扫描（jsQR 识别 + pako 解压）
 │   └── icons/          # PWA 图标
 ├── docs/               # 产品文档
 ├── assets/             # 设计素材 / 测试截图 / 参考图
@@ -42,6 +44,7 @@ python -m http.server 8080
 | 本地存储 | SQLite（SQL.js WASM + OPFS 持久化） |
 | 认证 | 本地 Web Crypto PBKDF2 |
 | 导出 | SheetJS xlsx v0.18（CDN） |
+| 二维码 | qrcode-generator（生成）、jsQR（识别）、pako（压缩） |
 | 离线 | Service Worker + Web App Manifest |
 | UI | 原生 HTML/CSS/JS，iOS 风格毛玻璃深色主题 |
 
@@ -75,6 +78,12 @@ python -m http.server 8080
 - **导入**：支持 Excel 导入，按货架名分组或导入到单个货架
 - 字段：序号、编号、名称、规格、数量、货架行、货架列、备注
 
+### 二维码传输（v2.1 新增）
+- **PC 端生成二维码**：货架导航栏「分享」按钮，生成带 Logo 的二维码
+- **手机端扫码导入**：扫描视图「扫码导入」按钮，调用摄像头实时识别二维码
+- 数据编码：pako gzip 压缩 + Base64，单货架 32 零件可放入二维码
+- 导入策略：覆盖现有货架 / 新建货架，支持跳过/覆盖/遇占用停止
+
 ### PWA 离线支持
 - Service Worker 缓存静态资源，支持离线访问
 - 可添加到手机主屏幕，独立图标和启动画面
@@ -88,6 +97,7 @@ python -m http.server 8080
 | v1.3 | 批量扫描 | 连续导入（起始位置/填充方向/覆盖策略/自动推进）、多编号选择、SQLite 持久化、导出按行列排序 |
 | v1.4 | 识别增强 | 条码识别、模板匹配、搜索筛选、撤销 |
 | v1.5 | 协作同步 | 局域网同步、Excel 导入、数据备份、标签打印 |
-| v2.0 | 账号系统 ← 当前 | 本地认证、用户数据隔离、Excel 导入 |
+| v2.0 | 账号系统 | 本地认证、用户数据隔离、Excel 导入 |
+| v2.1 | 二维码传输 ← 当前 | PC 端生成二维码、手机端扫码导入、pako 压缩 |
 | v2.5 | 智能化 | 库存预警、存取分析、语音录入、AI 辅助识别 |
 | v3.0 | 硬件集成 | 蓝牙扫码枪、RFID、电子货架标签、IoT 传感器 |

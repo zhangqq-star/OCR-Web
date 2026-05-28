@@ -2,7 +2,7 @@
  * Service Worker — 离线缓存策略
  */
 
-const CACHE_NAME = 'ocr-shelf-v5';
+const CACHE_NAME = 'ocr-shelf-v6';
 
 const PRE_CACHE = [
   './',
@@ -15,6 +15,8 @@ const PRE_CACHE = [
   './src/js/shelf.js',
   './src/js/export.js',
   './src/js/import.js',
+  './src/js/qrcode.js',
+  './src/js/scanner.js',
   './src/js/custom-select.js',
   './src/js/app.js',
   './manifest.json',
@@ -23,6 +25,9 @@ const PRE_CACHE = [
   'https://cdn.jsdelivr.net/npm/sql.js@1.10/dist/sql-wasm.js',
   'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+  'https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js',
+  'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js',
 ];
 
 // 安装：预缓存

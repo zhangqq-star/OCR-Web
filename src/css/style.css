@@ -433,6 +433,25 @@ input, textarea, button, select {
   border-color: var(--accent);
 }
 
+.btn-nav-share {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-light);
+  background: transparent;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+  margin-left: 4px;
+}
+
+.btn-nav-share:active {
+  background: var(--accent-light);
+}
+
 /* ===== 货架网格 ===== */
 .shelf-swipe-area {
   overflow-x: auto;
@@ -1707,4 +1726,45 @@ input, textarea, button, select {
   padding: 6px 10px;
   background: #FFF3CD;
   border-radius: var(--radius-sm);
+}
+
+/* ===== 二维码分享弹窗 ===== */
+.qr-container {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 12px;
+}
+
+.qr-container canvas {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.qr-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.qr-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+.qr-info-row span:last-child {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.qr-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 4px;
 }

@@ -32,6 +32,12 @@ const Shelf = (() => {
     return s ? s.name : '';
   }
 
+  function getShelfDataForQR() {
+    const s = shelves.find(s => s.id === activeShelfId);
+    if (!s) return null;
+    return { id: s.id, name: s.name, rowCount: s.rowCount || 4 };
+  }
+
   // ---- 初始化 ----
 
   async function init() {
@@ -549,6 +555,7 @@ const Shelf = (() => {
     getRows,
     getActiveShelfId,
     getActiveShelfName,
+    getShelfDataForQR,
     createShelf,
     renameCurrent,
     deleteCurrent,

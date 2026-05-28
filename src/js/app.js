@@ -13,6 +13,11 @@ function showToast(msg) {
 
 // 当前识别结果暂存
 let pendingOcrResult = null;
+
+// 二维码扫码导入状态
+let qrScanMode = false;
+let qrImportData = null;
+let qrImportRowCount = 4;
 let selectedBatchCodeIdx = 0; // 批量模式下用户选择的编号索引
 
 // 连续导入状态
@@ -68,6 +73,10 @@ async function startCamera() {
 }
 
 function stopCamera() {
+  if (qrScanMode) {
+    QRScanner.stopScan();
+    qrScanMode = false;
+  }
   Camera.stop();
   resetScanUI();
 }
@@ -95,6 +104,8 @@ function resetScanUI() {
   document.getElementById('btnStartCamera').classList.remove('hidden');
   document.getElementById('btnCapture').classList.add('hidden');
   document.getElementById('btnStopCamera').classList.add('hidden');
+  document.getElementById('btnBatchImport').classList.remove('hidden');
+  document.getElementById('btnScanImport').classList.remove('hidden');
   document.getElementById('scanPlaceholder').classList.remove('hidden');
   document.getElementById('ocrProgress').classList.add('hidden');
   document.getElementById('ocrResult').classList.add('hidden');
@@ -676,6 +687,7 @@ function batchEnd() {
   // 清理 UI
   document.getElementById('batchStatus').classList.add('hidden');
   document.getElementById('btnBatchImport').classList.remove('hidden');
+  document.getElementById('btnScanImport').classList.remove('hidden');
   document.getElementById('ocrResult').classList.add('hidden');
   pendingOcrResult = null;
 
@@ -705,6 +717,302 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+// ===== 二维码分享 =====
+async function openQRModal() {
+  const shelf = Shelf.getShelfDataForQR();
+  if (!shelf) { showToast('没有当前货架'); return; }
+
+  const parts = await DataStore.getByShelf(shelf.id);
+  if (parts.length === 0) { showToast('货架为空，无需分享'); return; }
+
+  const result = QRUtil.encodeShelfData(shelf, parts);
+  if (result.error) {
+    showToast('数据量过大，建议减少零件数量');
+    return;
+  }
+
+  document.getElementById('qrShelfName').textContent = shelf.name;
+  document.getElementById('qrPartCount').textContent = `${parts.length} 个`;
+  document.getElementById('qrDataSize').textContent = result.compressed
+    ? `${(result.size / 1024).toFixed(1)} KB (已压缩)`
+    : `${(result.size / 1024).toFixed(1)} KB`;
+
+  const canvas = document.getElementById('qrCanvas');
+  console.log('[QR] 正式生成, payload长度:', result.payload.length);
+  // 暂时不加 Logo，确保手机能扫
+  const verifyOk = await QRUtil.generate(canvas, result.payload, null);
+
+  // 显示验证状态
+  const statusEl = document.getElementById('qrVerifyStatus');
+  statusEl.textContent = verifyOk ? '✓ 可识别' : '✗ 无法识别';
+  statusEl.style.color = verifyOk ? '#34C759' : '#FF3B30';
+
+  console.log('[QR Share] payload preview:', result.payload.substring(0, 100));
+  console.log('[QR Share] payload length:', result.payload.length);
+
+  document.getElementById('modalQR').classList.remove('hidden');
+}
+
+function closeQRModal() {
+  document.getElementById('modalQR').classList.add('hidden');
+}
+
+function downloadQR() {
+  const canvas = document.getElementById('qrCanvas');
+  const shelf = Shelf.getShelfDataForQR();
+  QRUtil.download(canvas, `${shelf ? shelf.name : '货架'}_二维码.png`);
+  showToast('二维码已下载');
+}
+
+// ===== 扫码导入 =====
+function startQRScan() {
+  console.log('[QR] startQRScan called');
+  qrScanMode = true;
+  Camera.start().then(ok => {
+    console.log('[QR] Camera.start result:', ok);
+    if (!ok) {
+      qrScanMode = false;
+      showToast('无法访问摄像头，请检查权限');
+      return;
+    }
+    document.getElementById('scanPlaceholder').classList.add('hidden');
+    document.getElementById('btnStartCamera').classList.add('hidden');
+    document.getElementById('btnCapture').classList.add('hidden');
+    document.getElementById('btnStopCamera').classList.remove('hidden');
+    document.getElementById('btnBatchImport').classList.add('hidden');
+    document.getElementById('btnScanImport').classList.add('hidden');
+    showToast('正在扫描二维码...');
+
+    // 等待 video 有足够数据后再开始扫描
+    const video = document.getElementById('video');
+    console.log('[QR] video.readyState:', video.readyState, 'HAVE_ENOUGH_DATA:', video.HAVE_ENOUGH_DATA);
+    if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+      console.log('[QR] video ready, starting scanner');
+      QRScanner.startScan(onQRScanResult);
+    } else {
+      console.log('[QR] waiting for video loadeddata event');
+      video.addEventListener('loadeddata', function onReady() {
+        console.log('[QR] loadeddata fired, readyState:', video.readyState);
+        video.removeEventListener('loadeddata', onReady);
+        if (qrScanMode) {
+          QRScanner.startScan(onQRScanResult);
+        }
+      });
+    }
+  });
+}
+
+function stopQRScan() {
+  QRScanner.stopScan();
+  qrScanMode = false;
+  Camera.stop();
+  resetScanUI();
+}
+
+function onQRScanResult(decoded, raw) {
+  console.log('[QR] onQRScanResult called, decoded:', decoded);
+  qrImportData = decoded;
+  QRScanner.stopScan();
+  Camera.stop();
+  qrScanMode = false;
+
+  const partCount = decoded.p ? decoded.p.length : 0;
+  document.getElementById('qrImportSummary').textContent =
+    `扫描成功：${decoded.s.n}（${partCount} 个零件）`;
+
+  // 重置弹窗状态
+  const targetCtrl = document.querySelector('#qrImportTarget');
+  targetCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  targetCtrl.setAttribute('data-active', '1');
+  document.getElementById('qrImportShelfRow').classList.remove('hidden');
+  document.getElementById('qrImportNewShelfRow').classList.add('hidden');
+
+  const policyCtrl = document.querySelector('#qrImportPolicy');
+  policyCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  policyCtrl.setAttribute('data-active', '1');
+
+  // 初始化行数和方向
+  const dirCtrl = document.querySelector('#qrImportDirection');
+  dirCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  dirCtrl.setAttribute('data-active', '1');
+
+  qrImportRowCount = decoded.s.r || 4;
+  document.getElementById('qrImportRowCount').textContent = `${qrImportRowCount} 行`;
+  document.getElementById('btnQRImportRowMinus').disabled = qrImportRowCount <= 1;
+
+  // 填充货架选择并渲染预览
+  populateQRShelfSelect().then(async () => {
+    await renderQRImportPreview();
+    document.getElementById('modalQRImport').classList.remove('hidden');
+  });
+}
+
+async function populateQRShelfSelect() {
+  const shelves = await DB.getAllShelves(Auth.getOwnerId());
+  const select = document.getElementById('qrImportShelfSelect');
+  const qrName = qrImportData ? qrImportData.s.n : '';
+  select.innerHTML = shelves.map(s =>
+    `<option value="${s.id}" ${s.name === qrName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
+  ).join('');
+}
+
+function closeQRImportModal() {
+  document.getElementById('modalQRImport').classList.add('hidden');
+  qrImportData = null;
+  resetScanUI();
+}
+
+function adjustQRImportRowCount(delta) {
+  const newCount = qrImportRowCount + delta;
+  if (newCount < 1) return;
+  qrImportRowCount = newCount;
+  document.getElementById('qrImportRowCount').textContent = `${qrImportRowCount} 行`;
+  document.getElementById('btnQRImportRowMinus').disabled = qrImportRowCount <= 1;
+  renderQRImportPreview();
+}
+
+async function renderQRImportPreview() {
+  console.log('[QR] renderQRImportPreview called, qrImportData:', qrImportData);
+  if (!qrImportData) return;
+  const grid = document.getElementById('qrImportPreviewGrid');
+  console.log('[QR] grid element:', grid);
+  const COLS = 8;
+  const direction = document.querySelector('#qrImportDirection .seg-btn.active')?.dataset.dir || 'row-first';
+  const policy = document.querySelector('#qrImportPolicy .seg-btn.active')?.dataset.policy || 'skip';
+  const target = document.querySelector('#qrImportTarget .seg-btn.active')?.dataset.target || 'overwrite';
+
+  let occupiedMap = new Map();
+  if (target === 'overwrite') {
+    const shelfId = parseInt(document.getElementById('qrImportShelfSelect').value);
+    if (shelfId) {
+      const parts = await DB.getByShelf(shelfId);
+      parts.forEach(p => {
+        if (p.shelfRow != null && p.shelfCol != null) {
+          occupiedMap.set(`${p.shelfRow}_${p.shelfCol}`, { code: p.code, name: p.name });
+        }
+      });
+    }
+  }
+
+  const parts = qrImportData.p || [];
+  const planMap = new Map();
+  const occupied = new Map(occupiedMap);
+  let cursor = { r: 0, c: 0 };
+
+  for (const p of parts) {
+    const r = p.r, c = p.l;
+    if (r != null && c != null && r < qrImportRowCount && c < COLS) {
+      const key = `${r}_${c}`;
+      if (!occupied.has(key) || policy === 'overwrite') {
+        planMap.set(key, { code: p.c || p.n || '(空)', type: occupied.has(key) ? 'overwrite' : 'new' });
+        occupied.set(key, { code: p.c, name: p.n });
+      }
+    }
+  }
+
+  grid.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+  grid.innerHTML = '';
+
+  console.log('[QR] rendering grid, rowCount:', qrImportRowCount, 'parts:', parts.length, 'planMap:', planMap.size);
+
+  for (let row = 0; row < qrImportRowCount; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const key = `${row}_${col}`;
+      const planItem = planMap.get(key);
+      const existing = occupiedMap.get(key);
+
+      const cell = document.createElement('div');
+      cell.className = 'import-preview-cell';
+
+      const posEl = document.createElement('span');
+      posEl.className = 'import-preview-pos';
+      posEl.textContent = `${row + 1}-${col + 1}`;
+      cell.appendChild(posEl);
+
+      if (planItem) {
+        const codeEl = document.createElement('span');
+        codeEl.className = 'import-preview-code';
+        codeEl.textContent = planItem.code;
+        cell.appendChild(codeEl);
+        cell.classList.add(planItem.type === 'overwrite' ? 'preview-overwrite' : 'preview-new');
+      } else if (existing) {
+        const codeEl = document.createElement('span');
+        codeEl.className = 'import-preview-code';
+        codeEl.textContent = existing.code || existing.name || '(空)';
+        cell.appendChild(codeEl);
+        cell.classList.add('preview-existing');
+      } else {
+        cell.classList.add('preview-empty');
+      }
+
+      grid.appendChild(cell);
+    }
+  }
+
+  console.log('[QR] grid rendered, children:', grid.children.length);
+}
+
+async function executeQRImport() {
+  if (!qrImportData) { showToast('没有导入数据'); return; }
+
+  const target = document.querySelector('#qrImportTarget .seg-btn.active').dataset.target;
+  const policy = document.querySelector('#qrImportPolicy .seg-btn.active').dataset.policy;
+  const parts = qrImportData.p || [];
+  const shelfName = qrImportData.s.n;
+  const rowCount = qrImportRowCount;
+
+  let targetShelfId;
+
+  if (target === 'new') {
+    const newName = document.getElementById('qrImportNewShelfName').value.trim() || shelfName;
+    targetShelfId = await DB.createShelf(newName, Auth.getOwnerId(), rowCount);
+  } else {
+    targetShelfId = parseInt(document.getElementById('qrImportShelfSelect').value);
+    if (isNaN(targetShelfId)) {
+      showToast('请选择目标货架');
+      return;
+    }
+    await DB.updateShelfRowCount(targetShelfId, rowCount);
+  }
+
+  let successCount = 0;
+  let skipCount = 0;
+  let overwriteCount = 0;
+
+  for (const p of parts) {
+    const existing = await DataStore.getByPosition(p.r, p.l, targetShelfId);
+    if (existing) {
+      if (policy === 'skip') { skipCount++; continue; }
+      if (policy === 'stop') { break; }
+      if (policy === 'overwrite') {
+        await DataStore.removePart(existing.id);
+        overwriteCount++;
+      }
+    }
+    await DataStore.addPart({
+      name: p.n || '',
+      code: p.c || '',
+      specs: p.s || '',
+      quantity: p.q || 1,
+      note: p.t || '',
+      shelfRow: p.r,
+      shelfCol: p.l,
+      shelfId: targetShelfId,
+    });
+    successCount++;
+  }
+
+  closeQRImportModal();
+  qrImportData = null;
+
+  // 切换到目标货架
+  await Shelf.init();
+  await Shelf.switchTo(targetShelfId);
+  switchTab('viewShelf');
+
+  showToast(`导入完成：成功 ${successCount}，跳过 ${skipCount}，覆盖 ${overwriteCount}`);
 }
 
 // ===== 事件绑定 =====
@@ -810,6 +1118,49 @@ function bindEvents() {
 
   // 货架滑动切换
   Shelf.setupSwipe();
+
+  // 二维码分享
+  document.getElementById('btnShelfShare').addEventListener('click', openQRModal);
+  document.getElementById('btnQRCancel').addEventListener('click', closeQRModal);
+  document.getElementById('modalQR').querySelector('.modal-backdrop')
+    .addEventListener('click', closeQRModal);
+  document.getElementById('btnQRDownload').addEventListener('click', downloadQR);
+
+  // 扫码导入
+  document.getElementById('btnScanImport').addEventListener('click', startQRScan);
+  document.getElementById('btnQRImportCancel').addEventListener('click', closeQRImportModal);
+  document.getElementById('modalQRImport').querySelector('.modal-backdrop')
+    .addEventListener('click', closeQRImportModal);
+  document.getElementById('btnQRImportConfirm').addEventListener('click', executeQRImport);
+
+  // 扫码导入 — 目标切换
+  document.querySelectorAll('#qrImportTarget .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.target === 'new') {
+        document.getElementById('qrImportShelfRow').classList.add('hidden');
+        document.getElementById('qrImportNewShelfRow').classList.remove('hidden');
+      } else {
+        document.getElementById('qrImportShelfRow').classList.remove('hidden');
+        document.getElementById('qrImportNewShelfRow').classList.add('hidden');
+      }
+      renderQRImportPreview();
+    });
+  });
+
+  // 扫码导入 — 货架切换时重新渲染预览
+  document.getElementById('qrImportShelfSelect').addEventListener('change', renderQRImportPreview);
+
+  // 扫码导入 — 行数控制
+  document.getElementById('btnQRImportRowMinus').addEventListener('click', () => adjustQRImportRowCount(-1));
+  document.getElementById('btnQRImportRowPlus').addEventListener('click', () => adjustQRImportRowCount(1));
+
+  // 扫码导入 — 方向/策略切换时重新渲染预览
+  document.querySelectorAll('#qrImportDirection .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => renderQRImportPreview());
+  });
+  document.querySelectorAll('#qrImportPolicy .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => renderQRImportPreview());
+  });
 
   // 导出
   document.getElementById('btnExport').addEventListener('click', Exporter.openExportModal);

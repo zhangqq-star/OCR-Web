@@ -11,15 +11,18 @@ const Camera = (() => {
   async function start() {
     stop();
     try {
+      console.log('[Camera] requesting camera access, facingMode:', facingMode);
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: facingMode }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       });
+      console.log('[Camera] stream obtained, tracks:', stream.getTracks().length);
       video().srcObject = stream;
       await video().play();
+      console.log('[Camera] video playing, videoWidth:', video().videoWidth, 'videoHeight:', video().videoHeight);
       return true;
     } catch (err) {
-      console.error('摄像头启动失败:', err);
+      console.error('[Camera] 启动失败:', err);
       return false;
     }
   }
