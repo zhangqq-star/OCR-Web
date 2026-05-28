@@ -625,10 +625,18 @@ input, textarea, button, select {
   -webkit-backdrop-filter: blur(20px);
   border-top: 0.5px solid var(--separator);
   box-shadow: 0 -2px 12px rgba(0,0,0,0.1);
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.batch-action-bar:not(.hidden) {
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 .batch-action-bar.hidden {
-  display: none;
+  display: flex !important;
 }
 
 .btn-batch-action {
@@ -761,16 +769,31 @@ input, textarea, button, select {
   align-items: flex-end;
   justify-content: center;
   padding: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: visibility 0.3s;
+}
+
+.modal:not(.hidden) {
+  pointer-events: auto;
+  visibility: visible;
+  transition: visibility 0s;
 }
 
 .modal.hidden {
-  display: none;
+  display: flex !important;
 }
 
 .modal-backdrop {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.modal:not(.hidden) .modal-backdrop {
+  opacity: 1;
 }
 
 .modal-card {
@@ -784,6 +807,12 @@ input, textarea, button, select {
   background: var(--bg-card);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   box-shadow: var(--shadow-lg);
+  transform: translateY(100%);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal:not(.hidden) .modal-card {
+  transform: translateY(0);
 }
 
 @media (min-width: 500px) {
