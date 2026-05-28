@@ -477,10 +477,21 @@ const DB = (() => {
     scheduleSave();
   }
 
+  async function getAllShelvesInfo(ownerId) {
+    await open();
+    const shelves = await getAllShelves(ownerId);
+    const result = [];
+    for (const s of shelves) {
+      const parts = await getByShelf(s.id);
+      result.push({ ...s, partCount: parts.length });
+    }
+    return result;
+  }
+
   return {
     open, saveNow,
     // Shelves
-    createShelf, getAllShelves, updateShelf, updateShelfRowCount, deleteShelf,
+    createShelf, getAllShelves, getAllShelvesInfo, updateShelf, updateShelfRowCount, deleteShelf,
     // Parts
     add, update, remove, get, getByPosition, getByShelf, getAll, migratePartsToShelf,
     // Local Users (v3)

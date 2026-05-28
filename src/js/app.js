@@ -720,37 +720,132 @@ function escapeHtml(str) {
 }
 
 // ===== 二维码分享 =====
+let qrSelectedShelfIds = new Set();
+
 async function openQRModal() {
+  const shelves = await Shelf.getAllShelvesInfo();
+  if (shelves.length === 0) { showToast('没有货架数据'); return; }
+
+  const currentName = Shelf.getActiveShelfName();
+  const currentPartCount = shelves.find(s => s.id === Shelf.getActiveShelfId())?.partCount || 0;
+
+  document.getElementById('qrRangeCurrentName').textContent = currentName;
+  document.getElementById('qrRangeCurrentParts').textContent = `${currentPartCount} 个零件`;
+  document.getElementById('qrRangeAllCount').textContent = `${shelves.length} 个货架，共 ${shelves.reduce((s, x) => s + x.partCount, 0)} 个零件`;
+
+  document.getElementById('modalQRRange').classList.remove('hidden');
+}
+
+function closeQRRangeModal() {
+  document.getElementById('modalQRRange').classList.add('hidden');
+}
+
+async function openQRShelfSelectModal() {
+  const shelves = await Shelf.getAllShelvesInfo();
+  const list = document.getElementById('qrShelfSelectList');
+  qrSelectedShelfIds.clear();
+
+  list.innerHTML = shelves.map(s => `
+    <div class="qr-shelf-item" data-id="${s.id}">
+      <span class="qr-shelf-check"></span>
+      <span class="qr-shelf-name">${escapeHtml(s.name)}</span>
+      <span class="qr-shelf-count">${s.partCount} 个零件</span>
+    </div>
+  `).join('');
+
+  list.querySelectorAll('.qr-shelf-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const id = parseInt(item.dataset.id);
+      if (qrSelectedShelfIds.has(id)) {
+        qrSelectedShelfIds.delete(id);
+        item.classList.remove('selected');
+      } else {
+        qrSelectedShelfIds.add(id);
+        item.classList.add('selected');
+      }
+      updateQRShelfSelectInfo(shelves);
+    });
+  });
+
+  updateQRShelfSelectInfo(shelves);
+  document.getElementById('modalQRShelfSelect').classList.remove('hidden');
+}
+
+function updateQRShelfSelectInfo(shelves) {
+  const selected = shelves.filter(s => qrSelectedShelfIds.has(s.id));
+  const totalParts = selected.reduce((s, x) => s + x.partCount, 0);
+  document.getElementById('qrShelfSelectInfo').textContent =
+    `已选择 ${selected.length} 个货架，共 ${totalParts} 个零件`;
+}
+
+function closeQRShelfSelectModal() {
+  document.getElementById('modalQRShelfSelect').classList.add('hidden');
+  qrSelectedShelfIds.clear();
+}
+
+async function generateQRCurrent() {
+  closeQRRangeModal();
   const shelf = Shelf.getShelfDataForQR();
   if (!shelf) { showToast('没有当前货架'); return; }
-
   const parts = await DataStore.getByShelf(shelf.id);
-  if (parts.length === 0) { showToast('货架为空，无需分享'); return; }
+  if (parts.length === 0) { showToast('当前货架为空'); return; }
+  showQRResult([shelf], [parts]);
+}
 
-  const result = QRUtil.encodeShelfData(shelf, parts);
+async function generateQRSelected() {
+  closeQRRangeModal();
+  openQRShelfSelectModal();
+}
+
+async function confirmQRShelfSelect() {
+  if (qrSelectedShelfIds.size === 0) { showToast('请至少选择一个货架'); return; }
+  closeQRShelfSelectModal();
+  const shelves = await Shelf.getAllShelvesInfo();
+  const selected = shelves.filter(s => qrSelectedShelfIds.has(s.id));
+  const partsList = await Promise.all(selected.map(s => DataStore.getByShelf(s.id)));
+  showQRResult(selected, partsList);
+}
+
+async function generateQRAll() {
+  closeQRRangeModal();
+  const shelves = await Shelf.getAllShelvesInfo();
+  const partsList = await Promise.all(shelves.map(s => DataStore.getByShelf(s.id)));
+  showQRResult(shelves, partsList);
+}
+
+async function showQRResult(shelves, partsList) {
+  let result;
+  if (shelves.length === 1) {
+    const shelf = { name: shelves[0].name, rowCount: shelves[0].rowCount || shelves[0].row_count || 4 };
+    result = QRUtil.encodeShelfData(shelf, partsList[0]);
+    document.getElementById('qrShelfName').textContent = shelf.name;
+    document.getElementById('qrPartCount').textContent = `${partsList[0].length} 个`;
+  } else {
+    const multiData = shelves.map((s, i) => ({
+      name: s.name,
+      rowCount: s.rowCount || s.row_count || 4,
+      parts: partsList[i],
+    }));
+    result = QRUtil.encodeMultiShelfData(multiData);
+    document.getElementById('qrShelfName').textContent = shelves.map(s => s.name).join('、');
+    document.getElementById('qrPartCount').textContent = `${partsList.reduce((s, p) => s + p.length, 0)} 个`;
+  }
+
   if (result.error) {
-    showToast('数据量过大，建议减少零件数量');
+    showToast('数据量过大，请减少货架或零件数量');
     return;
   }
 
-  document.getElementById('qrShelfName').textContent = shelf.name;
-  document.getElementById('qrPartCount').textContent = `${parts.length} 个`;
   document.getElementById('qrDataSize').textContent = result.compressed
     ? `${(result.size / 1024).toFixed(1)} KB (已压缩)`
     : `${(result.size / 1024).toFixed(1)} KB`;
 
   const canvas = document.getElementById('qrCanvas');
-  console.log('[QR] 正式生成, payload长度:', result.payload.length);
-  // 暂时不加 Logo，确保手机能扫
   const verifyOk = await QRUtil.generate(canvas, result.payload, null);
 
-  // 显示验证状态
   const statusEl = document.getElementById('qrVerifyStatus');
   statusEl.textContent = verifyOk ? '✓ 可识别' : '✗ 无法识别';
   statusEl.style.color = verifyOk ? '#34C759' : '#FF3B30';
-
-  console.log('[QR Share] payload preview:', result.payload.substring(0, 100));
-  console.log('[QR Share] payload length:', result.payload.length);
 
   document.getElementById('modalQR').classList.remove('hidden');
 }
@@ -818,22 +913,32 @@ function onQRScanResult(decoded, raw) {
   Camera.stop();
   qrScanMode = false;
 
+  if (decoded.t === 'mf') {
+    showMultiShelfImportModal(decoded);
+  } else {
+    showSingleShelfImportModal(decoded);
+  }
+}
+
+function showSingleShelfImportModal(decoded) {
   const partCount = decoded.p ? decoded.p.length : 0;
   document.getElementById('qrImportSummary').textContent =
     `扫描成功：${decoded.s.n}（${partCount} 个零件）`;
 
-  // 重置弹窗状态
+  document.getElementById('qrImportTargetRow').classList.remove('hidden');
+  document.getElementById('qrImportShelfRow').classList.remove('hidden');
+  document.getElementById('qrImportNewShelfRow').classList.add('hidden');
+  document.getElementById('qrImportRowControlRow').classList.remove('hidden');
+  document.getElementById('qrImportMultiShelfList').classList.add('hidden');
+
   const targetCtrl = document.querySelector('#qrImportTarget');
   targetCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   targetCtrl.setAttribute('data-active', '1');
-  document.getElementById('qrImportShelfRow').classList.remove('hidden');
-  document.getElementById('qrImportNewShelfRow').classList.add('hidden');
 
   const policyCtrl = document.querySelector('#qrImportPolicy');
   policyCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   policyCtrl.setAttribute('data-active', '1');
 
-  // 初始化行数和方向
   const dirCtrl = document.querySelector('#qrImportDirection');
   dirCtrl.querySelectorAll('.seg-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   dirCtrl.setAttribute('data-active', '1');
@@ -842,20 +947,52 @@ function onQRScanResult(decoded, raw) {
   document.getElementById('qrImportRowCount').textContent = `${qrImportRowCount} 行`;
   document.getElementById('btnQRImportRowMinus').disabled = qrImportRowCount <= 1;
 
-  // 填充货架选择并渲染预览
   populateQRShelfSelect().then(async () => {
     await renderQRImportPreview();
     document.getElementById('modalQRImport').classList.remove('hidden');
   });
 }
 
-async function populateQRShelfSelect() {
-  const shelves = await DB.getAllShelves(Auth.getOwnerId());
-  const select = document.getElementById('qrImportShelfSelect');
-  const qrName = qrImportData ? qrImportData.s.n : '';
-  select.innerHTML = shelves.map(s =>
-    `<option value="${s.id}" ${s.name === qrName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
-  ).join('');
+async function showMultiShelfImportModal(decoded) {
+  const shelves = decoded.ss || [];
+  const totalParts = shelves.reduce((s, x) => s + (x.p ? x.p.length : 0), 0);
+
+  document.getElementById('qrImportSummary').textContent =
+    `扫描成功：共 ${shelves.length} 个货架，${totalParts} 个零件`;
+
+  document.getElementById('qrImportTargetRow').classList.add('hidden');
+  document.getElementById('qrImportShelfRow').classList.add('hidden');
+  document.getElementById('qrImportNewShelfRow').classList.add('hidden');
+  document.getElementById('qrImportRowControlRow').classList.add('hidden');
+  document.getElementById('qrImportMultiShelfList').classList.remove('hidden');
+
+  const existingShelves = await DB.getAllShelves(Auth.getOwnerId());
+  const existingNames = new Set(existingShelves.map(s => s.name));
+
+  const list = document.getElementById('qrImportMultiShelfItems');
+  list.innerHTML = shelves.map((s, i) => {
+    const conflict = existingNames.has(s.n);
+    return `
+      <div class="qr-multi-shelf-item" data-idx="${i}">
+        <div class="qr-multi-shelf-header">
+          <span class="qr-multi-shelf-name">${escapeHtml(s.n)}</span>
+          <span class="qr-multi-shelf-count">${s.p ? s.p.length : 0} 个零件</span>
+        </div>
+        <div class="qr-multi-shelf-status ${conflict ? 'conflict' : 'new'}">
+          ${conflict ? '⚠️ 已存在' : '🆕 新货架'}
+        </div>
+        ${conflict ? `
+          <select class="qr-multi-shelf-action" data-idx="${i}">
+            <option value="rename">新建名称</option>
+            <option value="overwrite">覆盖现有</option>
+            <option value="skip">跳过</option>
+          </select>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('modalQRImport').classList.remove('hidden');
 }
 
 function closeQRImportModal() {
@@ -875,7 +1012,7 @@ function adjustQRImportRowCount(delta) {
 
 async function renderQRImportPreview() {
   console.log('[QR] renderQRImportPreview called, qrImportData:', qrImportData);
-  if (!qrImportData) return;
+  if (!qrImportData || qrImportData.t !== 'sf') return;
   const grid = document.getElementById('qrImportPreviewGrid');
   console.log('[QR] grid element:', grid);
   const COLS = 8;
@@ -957,6 +1094,14 @@ async function renderQRImportPreview() {
 async function executeQRImport() {
   if (!qrImportData) { showToast('没有导入数据'); return; }
 
+  if (qrImportData.t === 'mf') {
+    await executeMultiShelfImport();
+  } else {
+    await executeSingleShelfImport();
+  }
+}
+
+async function executeSingleShelfImport() {
   const target = document.querySelector('#qrImportTarget .seg-btn.active').dataset.target;
   const policy = document.querySelector('#qrImportPolicy .seg-btn.active').dataset.policy;
   const parts = qrImportData.p || [];
@@ -1007,12 +1152,86 @@ async function executeQRImport() {
   closeQRImportModal();
   qrImportData = null;
 
-  // 切换到目标货架
   await Shelf.init();
   await Shelf.switchTo(targetShelfId);
   switchTab('viewShelf');
 
   showToast(`导入完成：成功 ${successCount}，跳过 ${skipCount}，覆盖 ${overwriteCount}`);
+}
+
+async function executeMultiShelfImport() {
+  const shelves = qrImportData.ss || [];
+  const policy = document.querySelector('#qrImportPolicy .seg-btn.active')?.dataset.policy || 'skip';
+  let totalSuccess = 0, totalSkip = 0, totalOverwrite = 0;
+  let importedShelfIds = [];
+
+  for (let i = 0; i < shelves.length; i++) {
+    const s = shelves[i];
+    const item = document.querySelector(`.qr-multi-shelf-item[data-idx="${i}"]`);
+    const actionEl = item?.querySelector('.qr-multi-shelf-action');
+    const action = actionEl ? actionEl.value : 'rename';
+
+    if (action === 'skip') continue;
+
+    const existingShelves = await DB.getAllShelves(Auth.getOwnerId());
+    const existing = existingShelves.find(x => x.name === s.n);
+    let targetShelfId;
+
+    if (existing && action === 'overwrite') {
+      targetShelfId = existing.id;
+      await DB.updateShelfRowCount(targetShelfId, s.r || 4);
+    } else {
+      let name = s.n;
+      if (existing && action === 'rename') {
+        name = s.n + '_' + Date.now().toString(36);
+      }
+      targetShelfId = await DB.createShelf(name, Auth.getOwnerId(), s.r || 4);
+    }
+
+    importedShelfIds.push(targetShelfId);
+
+    for (const p of (s.p || [])) {
+      const posOccupied = await DataStore.getByPosition(p.r, p.l, targetShelfId);
+      if (posOccupied) {
+        if (policy === 'skip') { totalSkip++; continue; }
+        if (policy === 'overwrite') {
+          await DataStore.removePart(posOccupied.id);
+          totalOverwrite++;
+        }
+      }
+      await DataStore.addPart({
+        name: p.n || '',
+        code: p.c || '',
+        specs: p.s || '',
+        quantity: p.q || 1,
+        note: p.t || '',
+        shelfRow: p.r,
+        shelfCol: p.l,
+        shelfId: targetShelfId,
+      });
+      totalSuccess++;
+    }
+  }
+
+  closeQRImportModal();
+  qrImportData = null;
+
+  await Shelf.init();
+  if (importedShelfIds.length > 0) {
+    await Shelf.switchTo(importedShelfIds[0]);
+  }
+  switchTab('viewShelf');
+
+  showToast(`导入完成：成功 ${totalSuccess}，跳过 ${totalSkip}，覆盖 ${totalOverwrite}`);
+}
+
+async function populateQRShelfSelect() {
+  const shelves = await DB.getAllShelves(Auth.getOwnerId());
+  const select = document.getElementById('qrImportShelfSelect');
+  const qrName = qrImportData ? qrImportData.s.n : '';
+  select.innerHTML = shelves.map(s =>
+    `<option value="${s.id}" ${s.name === qrName ? 'selected' : ''}>${escapeHtml(s.name)}</option>`
+  ).join('');
 }
 
 // ===== 事件绑定 =====
@@ -1125,6 +1344,19 @@ function bindEvents() {
   document.getElementById('modalQR').querySelector('.modal-backdrop')
     .addEventListener('click', closeQRModal);
   document.getElementById('btnQRDownload').addEventListener('click', downloadQR);
+
+  // 导出范围选择
+  document.getElementById('btnQRRangeCurrent').addEventListener('click', generateQRCurrent);
+  document.getElementById('btnQRRangeSelect').addEventListener('click', generateQRSelected);
+  document.getElementById('btnQRRangeAll').addEventListener('click', generateQRAll);
+  document.getElementById('modalQRRange').querySelector('.modal-backdrop')
+    .addEventListener('click', closeQRRangeModal);
+
+  // 选择货架导出
+  document.getElementById('btnQRShelfSelectConfirm').addEventListener('click', confirmQRShelfSelect);
+  document.getElementById('btnQRShelfSelectCancel').addEventListener('click', closeQRShelfSelectModal);
+  document.getElementById('modalQRShelfSelect').querySelector('.modal-backdrop')
+    .addEventListener('click', closeQRShelfSelectModal);
 
   // 扫码导入
   document.getElementById('btnScanImport').addEventListener('click', startQRScan);

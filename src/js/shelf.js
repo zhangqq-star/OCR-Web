@@ -38,6 +38,10 @@ const Shelf = (() => {
     return { id: s.id, name: s.name, rowCount: s.rowCount || 4 };
   }
 
+  async function getAllShelvesInfo() {
+    return DB.getAllShelvesInfo(Auth.getOwnerId());
+  }
+
   // ---- 初始化 ----
 
   async function init() {
@@ -556,6 +560,7 @@ const Shelf = (() => {
     getActiveShelfId,
     getActiveShelfName,
     getShelfDataForQR,
+    getAllShelvesInfo,
     createShelf,
     renameCurrent,
     deleteCurrent,

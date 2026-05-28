@@ -38,6 +38,41 @@ const QRUtil = (() => {
     return { payload, compressed: true, size: payloadBytes };
   }
 
+  function encodeMultiShelfData(shelvesData) {
+    const data = {
+      t: 'mf',
+      v: 1,
+      ss: shelvesData.map(s => ({
+        n: s.name,
+        r: s.rowCount || 4,
+        p: (s.parts || []).map(p => ({
+          c: p.code || '',
+          n: p.name || '',
+          s: p.specs || '',
+          q: p.quantity || 1,
+          r: p.shelfRow,
+          l: p.shelfCol,
+          t: p.note || '',
+        })),
+      })),
+    };
+    const json = JSON.stringify(data);
+    const jsonBytes = new TextEncoder().encode(json);
+    console.log('[QR] Multi-shelf JSON 字节数:', jsonBytes.length);
+
+    const compressed = pako.gzip(json);
+    const b64 = uint8ToBase64(compressed);
+    const payload = 'gz:' + b64;
+    const payloadBytes = new TextEncoder().encode(payload).length;
+    console.log('[QR] Multi-shelf 压缩后字节数:', payloadBytes);
+
+    if (payloadBytes > MAX_QR_BYTES) {
+      return { payload: '', compressed: true, size: payloadBytes, error: true };
+    }
+
+    return { payload, compressed: true, size: payloadBytes };
+  }
+
   function uint8ToBase64(bytes) {
     let binary = '';
     for (let i = 0; i < bytes.length; i++) {
@@ -157,5 +192,5 @@ const QRUtil = (() => {
     link.click();
   }
 
-  return { encodeShelfData, generate, download };
+  return { encodeShelfData, encodeMultiShelfData, generate, download };
 })();

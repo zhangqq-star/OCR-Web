@@ -420,6 +420,51 @@
     </div>
   </div>
 
+  <!-- 导出范围选择弹窗 -->
+  <div id="modalQRRange" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>分享到手机</h3>
+      <p class="qr-hint" style="margin-bottom:14px;">请选择导出范围</p>
+      <button id="btnQRRangeCurrent" class="qr-range-btn">
+        <span class="qr-range-icon">📦</span>
+        <div class="qr-range-info">
+          <span class="qr-range-title">导出当前货架</span>
+          <span id="qrRangeCurrentName" class="qr-range-desc">货架 1</span>
+          <span id="qrRangeCurrentParts" class="qr-range-meta">0 个零件</span>
+        </div>
+      </button>
+      <button id="btnQRRangeSelect" class="qr-range-btn">
+        <span class="qr-range-icon">📋</span>
+        <div class="qr-range-info">
+          <span class="qr-range-title">选择货架导出</span>
+          <span class="qr-range-desc">勾选要分享的货架</span>
+        </div>
+      </button>
+      <button id="btnQRRangeAll" class="qr-range-btn">
+        <span class="qr-range-icon">📚</span>
+        <div class="qr-range-info">
+          <span class="qr-range-title">导出全部货架</span>
+          <span id="qrRangeAllCount" class="qr-range-desc">0 个货架</span>
+        </div>
+      </button>
+    </div>
+  </div>
+
+  <!-- 选择货架导出弹窗 -->
+  <div id="modalQRShelfSelect" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card glass-card">
+      <h3>选择要导出的货架</h3>
+      <div id="qrShelfSelectList" class="qr-shelf-select-list"></div>
+      <p id="qrShelfSelectInfo" class="qr-shelf-select-info">已选择 0 个货架</p>
+      <div class="modal-actions">
+        <button id="btnQRShelfSelectCancel" class="btn-secondary">取消</button>
+        <button id="btnQRShelfSelectConfirm" class="btn-primary">生成二维码</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 扫码导入确认弹窗 -->
   <div id="modalQRImport" class="modal hidden">
     <div class="modal-backdrop"></div>
@@ -469,6 +514,12 @@
       <label>位置预览</label>
       <div id="qrImportPreviewGrid" class="import-preview-grid"></div>
       <div id="qrImportSpillWarning" class="import-spill-warning hidden"></div>
+
+      <!-- 多货架导入列表 -->
+      <div id="qrImportMultiShelfList" class="hidden">
+        <label>货架列表</label>
+        <div id="qrImportMultiShelfItems" class="qr-multi-shelf-list"></div>
+      </div>
 
       <div class="modal-actions">
         <button id="btnQRImportCancel" class="btn-secondary">取消</button>

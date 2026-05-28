@@ -21,8 +21,9 @@ const QRScanner = (() => {
         json = raw;
       }
       const data = JSON.parse(json);
-      if (data.t !== 'sf' || !data.s || !data.p) return null;
-      return data;
+      if (data.t === 'sf' && data.s && data.p) return data;
+      if (data.t === 'mf' && data.ss) return data;
+      return null;
     } catch (e) {
       console.warn('[QRScanner] decode error:', e.message);
       return null;
