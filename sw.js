@@ -2,7 +2,7 @@
  * Service Worker — 离线缓存策略
  */
 
-const CACHE_NAME = 'ocr-shelf-v6';
+const CACHE_NAME = 'ocr-shelf-v7';
 
 const PRE_CACHE = [
   './',
