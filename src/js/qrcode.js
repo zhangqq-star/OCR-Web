@@ -86,6 +86,20 @@ const QRUtil = (() => {
     const showLogo = logoUrl && textBytes <= 1500;
     console.log('[QR] bytes:', textBytes, 'showLogo:', showLogo);
 
+    // 根据数据量调整二维码尺寸和纠错级别
+    let qrSize = 280;
+    let correctLevel = QRCode.CorrectLevel.L;
+
+    if (textBytes > 2000) {
+      qrSize = 350;
+      correctLevel = QRCode.CorrectLevel.M;
+    } else if (textBytes > 1500) {
+      qrSize = 320;
+      correctLevel = QRCode.CorrectLevel.L;
+    }
+
+    console.log('[QR] size:', qrSize, 'correctLevel:', correctLevel === QRCode.CorrectLevel.L ? 'L' : 'M');
+
     const tmpDiv = document.createElement('div');
     tmpDiv.style.display = 'none';
     document.body.appendChild(tmpDiv);
@@ -93,26 +107,26 @@ const QRUtil = (() => {
     try {
       const qr = new QRCode(tmpDiv, {
         text: text,
-        width: 280,
-        height: 280,
+        width: qrSize,
+        height: qrSize,
         colorDark: '#1C1C1E',
         colorLight: '#FFFFFF',
-        correctLevel: QRCode.CorrectLevel.L,
+        correctLevel: correctLevel,
       });
 
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(r => setTimeout(r, 200));
       const srcCanvas = tmpDiv.querySelector('canvas');
       console.log('[QR] srcCanvas:', !!srcCanvas);
 
       if (srcCanvas) {
         const ctx = canvas.getContext('2d');
-        canvas.width = 280;
-        canvas.height = 280;
-        ctx.clearRect(0, 0, 280, 280);
-        ctx.drawImage(srcCanvas, 0, 0, 280, 280);
+        canvas.width = qrSize;
+        canvas.height = qrSize;
+        ctx.clearRect(0, 0, qrSize, qrSize);
+        ctx.drawImage(srcCanvas, 0, 0, qrSize, qrSize);
 
         if (showLogo) {
-          drawLogo(ctx, 280, logoUrl);
+          drawLogo(ctx, qrSize, logoUrl);
         }
         console.log('[QR] 生成成功');
       } else {
@@ -132,9 +146,20 @@ const QRUtil = (() => {
         try {
           const ctx = canvas.getContext('2d');
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'attemptBoth',
-          });
+
+          // 尝试多种参数组合来提高识别率
+          const configs = [
+            { inversionAttempts: 'attemptBoth' },
+            { inversionAttempts: 'dontInvert' },
+            { inversionAttempts: 'onlyInvert' },
+          ];
+
+          let code = null;
+          for (const config of configs) {
+            code = jsQR(imageData.data, imageData.width, imageData.height, config);
+            if (code && code.data) break;
+          }
+
           const ok = !!(code && code.data);
           console.log('[QR] 验证:', ok ? '成功' : '失败');
           resolve(ok);
@@ -142,7 +167,7 @@ const QRUtil = (() => {
           console.warn('[QR] 验证出错:', e.message);
           resolve(false);
         }
-      }, 100);
+      }, 150);
     });
   }
 
